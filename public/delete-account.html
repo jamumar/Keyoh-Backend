@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Delete Account — KEYOH</title>
+  <meta name="description" content="Request deletion of your KEYOH account and personal data." />
+  <style>
+    :root {
+      --black: #0a0a0a;
+      --card: #141414;
+      --border: #2a2a2a;
+      --gold: #c9a227;
+      --white: #ffffff;
+      --dim: #a0a0a0;
+      --red: #e74c3c;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--black);
+      color: var(--white);
+      line-height: 1.6;
+      padding: 24px 20px 64px;
+    }
+    .wrap { max-width: 520px; margin: 0 auto; }
+    .brand {
+      color: var(--gold);
+      font-size: 13px;
+      letter-spacing: 2px;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .meta {
+      color: var(--dim);
+      font-size: 14px;
+      margin-bottom: 24px;
+    }
+    .intro {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 28px;
+      color: #ddd;
+      font-size: 15px;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      color: var(--gold);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+    input[type="email"] {
+      width: 100%;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 16px;
+      color: var(--white);
+      font-size: 16px;
+      outline: none;
+      margin-bottom: 16px;
+    }
+    input[type="email"]:focus {
+      border-color: var(--gold);
+    }
+    button {
+      width: 100%;
+      background: var(--gold);
+      color: var(--black);
+      border: none;
+      border-radius: 12px;
+      padding: 16px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .note {
+      margin-top: 16px;
+      color: var(--dim);
+      font-size: 13px;
+    }
+    .message {
+      display: none;
+      margin-top: 16px;
+      padding: 14px 16px;
+      border-radius: 12px;
+      font-size: 14px;
+    }
+    .message.success {
+      display: block;
+      background: rgba(201, 162, 39, 0.12);
+      border: 1px solid var(--gold);
+      color: var(--gold);
+    }
+    .message.error {
+      display: block;
+      background: rgba(231, 76, 60, 0.12);
+      border: 1px solid var(--red);
+      color: #ff8a7a;
+    }
+    .nav {
+      margin-bottom: 32px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .nav a {
+      text-decoration: none;
+      color: var(--gold);
+      font-size: 14px;
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+      border-radius: 8px;
+    }
+    .nav a.active {
+      border-color: var(--gold);
+      background: rgba(201, 162, 39, 0.12);
+    }
+    footer {
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+      color: var(--dim);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">KEYOH</div>
+    <h1>Delete account</h1>
+    <p class="meta">Request permanent deletion of your KEYOH account</p>
+
+    <div class="intro">
+      Enter the email address linked to your KEYOH account. We will process your deletion request and remove your personal data. This cannot be undone.
+    </div>
+
+    <form id="deleteForm">
+      <label for="email">Email address</label>
+      <input
+        id="email"
+        name="email"
+        type="email"
+        required
+        autocomplete="email"
+        placeholder="you@example.com"
+      />
+      <button type="submit" id="submitBtn">Submit deletion request</button>
+    </form>
+
+    <div id="message" class="message" role="status"></div>
+
+    <p class="note">
+      Requests are usually processed within 7 days. Questions?
+      <a href="mailto:contact@keyoh.co.uk" style="color: var(--gold)">contact@keyoh.co.uk</a>
+    </p>
+
+    <footer>
+      © Dare to Accept Limited · KEYOH · Nottingham, UK
+    </footer>
+  </div>
+
+  <script>
+    const form = document.getElementById('deleteForm');
+    const message = document.getElementById('message');
+    const submitBtn = document.getElementById('submitBtn');
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      message.className = 'message';
+      message.textContent = '';
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting...';
+
+      const email = document.getElementById('email').value.trim();
+
+      try {
+        const response = await fetch('/delete-account', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        });
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(data.message || 'Something went wrong.');
+        }
+
+        message.className = 'message success';
+        message.textContent = data.message || 'Your deletion request has been submitted.';
+        form.reset();
+      } catch (error) {
+        message.className = 'message error';
+        message.textContent = error.message || 'Could not submit request. Please try again.';
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit deletion request';
+      }
+    });
+  </script>
+</body>
+</html>

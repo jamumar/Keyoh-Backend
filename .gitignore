@@ -1,0 +1,18 @@
+# Ignore environment variables
+.env
+
+# Ignore public folder (including images, uploads, etc.)
+/public/uploads
+
+# Optional: ignore node_modules and log files
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Ignore OS and IDE-specific files
+.DS_Store
+.vscode/
+.idea/
+.vscode/private-folder-alias.json
+/logs/*
