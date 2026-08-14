@@ -17,7 +17,7 @@ if (process.env.STRIPE_SECRET_KEY) {
 }
 
 // GET /verification/postcode-lookup — Royal Mail PAF & Ordnance Survey UK Address Verification
-router.get('/postcode-lookup', ChatAuthMiddleware, async (req, res) => {
+router.get('/postcode-lookup', async (req, res) => {
   try {
     const postcode = req.query.postcode || req.query.q;
     if (!postcode) {
