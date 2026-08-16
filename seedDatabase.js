@@ -6,7 +6,7 @@ const bcrypt = require('bcrypt');
 async function seedDatabase() {
   console.log('[seeder] Initializing database seeding...');
   try {
-    await sequelize.sync();
+    await sequelize.sync({ alter: true });
 
     // 1. Seed Property Types
     const pTypes = [
