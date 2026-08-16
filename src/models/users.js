@@ -101,6 +101,10 @@ const Users = sequelize.define("users", {
         type: DataTypes.STRING(255),
         allowNull: true,
     },
+    avatar: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+    },
 });
 
 Users.associate = function (models) {

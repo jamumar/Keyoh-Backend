@@ -61,6 +61,33 @@ router.post('/push-token', CustomerMiddleware, async (req, res) => {
     }
 });
 
+router.put('/profile', CustomerMiddleware, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { name, avatar, location } = req.body;
+        const user = await User.findByPk(userId);
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+        if (name && typeof name === 'string') user.name = name.trim();
+        if (avatar !== undefined) user.avatar = avatar;
+        if (location !== undefined) user.location = location;
+        await user.save();
+
+        const safeUser = user.toJSON();
+        delete safeUser.password;
+
+        return res.status(200).json({
+            success: true,
+            message: 'Profile updated successfully',
+            data: safeUser,
+        });
+    } catch (error) {
+        console.error('[Auth] ❌ profile update error:', error.message);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
 router.post('/login', async (req, res) => {
     try {
         const { email, password } = req.body
