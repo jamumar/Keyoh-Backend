@@ -51,6 +51,58 @@ async function checkContentSafety(text) {
     }
   }
 
+  return { flagged: false };
+}
+
+async function checkImageSafety(imageUrlOrBase64) {
+  const openAiKey = process.env.OPENAI_API_KEY;
+  if (openAiKey && imageUrlOrBase64) {
+    try {
+      const isDataUrl = imageUrlOrBase64.startsWith('data:') || imageUrlOrBase64.startsWith('http');
+      const formattedUrl = isDataUrl ? imageUrlOrBase64 : `data:image/jpeg;base64,${imageUrlOrBase64}`;
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${openAiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: 'Analyze this photo for a UK property app listing. Determine if it is a valid property photo (room interior, building exterior, garden, kitchen, bathroom, floorplan) or an invalid upload (such as a mobile app screenshot, meme, ID document, or non-property image). Respond in JSON format: {"safe": true/false, "isPropertyPhoto": true/false, "reason": "..."}',
+                },
+                { type: 'image_url', image_url: { url: formattedUrl } },
+              ],
+            },
+          ],
+          response_format: { type: 'json_object' },
+        }),
+      });
+
+      if (response.ok) {
+        const payload = await response.json();
+        const res = JSON.parse(payload.choices[0].message.content);
+        if (res.safe === false || res.isPropertyPhoto === false) {
+          return {
+            flagged: true,
+            isPropertyPhoto: Boolean(res.isPropertyPhoto),
+            reason: res.reason || 'Image is not a valid property photo (app screenshot or non-property image detected)',
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('[ModerationService] AI Image Vision scan error:', e.message);
+    }
+  }
+  return { flagged: false, isPropertyPhoto: true };
+}
+
 async function checkVideoSafety(streamId, thumbnailUrl) {
   // If OPENAI_API_KEY set, perform GPT-4 Vision / OpenAI moderation scan on video thumbnail
   const openAiKey = process.env.OPENAI_API_KEY;
@@ -91,4 +143,4 @@ async function checkVideoSafety(streamId, thumbnailUrl) {
   return { flagged: false };
 }
 
-module.exports = { checkContentSafety, checkVideoSafety };
+module.exports = { checkContentSafety, checkImageSafety, checkVideoSafety };

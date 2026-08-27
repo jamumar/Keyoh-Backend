@@ -7,10 +7,20 @@ const { sendChatPushNotification } = require('../services/pushNotificationServic
 
 function formatConversation(c) {
     const json = c.toJSON ? c.toJSON() : c;
-    const msgs = (json.messages || []).map(m => ({
+    const rawMsgs = Array.isArray(json.messages) ? json.messages : [];
+    
+    // Sort messages in ascending chronological order (oldest first, newest last)
+    const sortedRaw = rawMsgs.slice().sort((a, b) => {
+        const tA = new Date(a.createdAt || a.timestamp || 0).getTime();
+        const tB = new Date(b.createdAt || b.timestamp || 0).getTime();
+        if (tA !== tB) return tA - tB;
+        return String(a.id || '').localeCompare(String(b.id || ''));
+    });
+
+    const msgs = sortedRaw.map(m => ({
         id: m.id,
-        senderId: m.sender_id,
-        senderName: m.sender_name,
+        senderId: m.sender_id || m.senderId,
+        senderName: m.sender_name || m.senderName,
         text: m.text,
         time: m.time,
         createdAt: m.createdAt,
