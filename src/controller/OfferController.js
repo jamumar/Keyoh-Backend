@@ -481,6 +481,10 @@ router.post('/:id/complete', ChatAuthMiddleware, async (req, res) => {
         await offer.save();
 
         // Mark property as sold!
+        await Properties.update(
+            { status: 'sold', sold_at: new Date() },
+            { where: { id: offer.property_id } }
+        );
         if (offer.property) {
             offer.property.status = 'sold';
             offer.property.sold_at = new Date();
