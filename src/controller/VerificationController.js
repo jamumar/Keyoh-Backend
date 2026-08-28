@@ -3,6 +3,7 @@ const router = express.Router();
 const Users = require('../models/users');
 const { ChatAuthMiddleware, PropertyOwnerMiddleware } = require('../middleware');
 const { lookupPostcode } = require('../services/addressService');
+const { sendPushToUser } = require('../services/pushNotificationService');
 
 // Initialize Stripe SDK conditionally if STRIPE_SECRET_KEY is configured
 let stripe = null;
@@ -220,6 +221,13 @@ router.post('/stripe-identity/webhook', async (req, res) => {
           user.is_verified_buyer = true;
           await user.save();
           console.log(`[StripeWebhook] 🎉 User #${userId} (${user.email}) Stripe Identity status set to PASS`);
+
+          // Dispatch push notification to user
+          sendPushToUser(user.id, {
+            title: 'KEYOH | Identity Verified ✓',
+            body: 'Congratulations! Your Stripe Identity check passed. Your Verified Buyer status is active.',
+            data: { type: 'verification_passed', screen: 'VerifiedBuyer' },
+          });
         }
       }
     } else if (event?.type === 'identity.verification_session.requires_input') {
@@ -230,6 +238,13 @@ router.post('/stripe-identity/webhook', async (req, res) => {
         if (user) {
           user.stripe_identity_status = 'fail';
           await user.save();
+
+          // Dispatch push notification to user
+          sendPushToUser(user.id, {
+            title: 'KEYOH | Verification Action Needed ⚠️',
+            body: 'Your identity check requires input. Please re-upload a clear photo of your ID document.',
+            data: { type: 'verification_failed', screen: 'VerifiedBuyer' },
+          });
         }
       }
     }
@@ -271,6 +286,15 @@ router.post('/stripe-identity/simulate-result', ChatAuthMiddleware, async (req, 
     const isVerified = calculateVerifiedStatus(user);
     user.is_verified_buyer = isVerified;
     await user.save();
+
+    // Dispatch push notification
+    sendPushToUser(user.id, {
+      title: result === 'pass' ? 'KEYOH | Identity Verified ✓' : 'KEYOH | Verification Action Needed ⚠️',
+      body: result === 'pass'
+        ? 'Congratulations! Your Stripe Identity check passed. Your Verified Buyer status is active.'
+        : 'Your identity check requires input. Please re-upload a clear photo of your ID document.',
+      data: { type: result === 'pass' ? 'verification_passed' : 'verification_failed', screen: 'VerifiedBuyer' },
+    });
 
     return res.status(200).json({
       success: true,
