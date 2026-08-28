@@ -32,10 +32,13 @@ async function connectDB() {
     try {
         await sequelize.authenticate();
         console.log('[db] Database connected successfully.');
-        try {
-            await sequelize.query('ALTER TABLE users ADD COLUMN push_token VARCHAR(255) NULL;');
-        } catch (colErr) {
-            // Column already exists
+        // Auto-add missing columns
+        const migrations = [
+            'ALTER TABLE users ADD COLUMN push_token VARCHAR(255) NULL;',
+            'ALTER TABLE users ADD COLUMN avatar TEXT NULL;',
+        ];
+        for (const sql of migrations) {
+            try { await sequelize.query(sql); } catch (e) { /* Column already exists */ }
         }
     } catch (error) {
         console.error('[db] Database connection failed:', error.message);

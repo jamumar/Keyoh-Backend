@@ -24,13 +24,6 @@ router.post('/push-token', CustomerMiddleware, async (req, res) => {
         const userId = req.user.id;
         const { push_token } = req.body;
 
-        if (!push_token || typeof push_token !== 'string') {
-            return res.status(400).json({
-                success: false,
-                message: 'push_token string is required',
-            });
-        }
-
         const user = await User.findByPk(userId);
         if (!user) {
             return res.status(404).json({
@@ -39,10 +32,28 @@ router.post('/push-token', CustomerMiddleware, async (req, res) => {
             });
         }
 
-        user.push_token = push_token.trim();
+        if (!push_token || typeof push_token !== 'string' || push_token.trim() === '') {
+            user.push_token = null;
+            await user.save();
+            console.log(`[Auth] ✓ Cleared push token for User #${userId} (${user.email})`);
+            return res.status(200).json({
+                success: true,
+                message: 'Push token cleared successfully',
+            });
+        }
+
+        const cleanToken = push_token.trim();
+
+        // Disassociate this device push token from any previous user account
+        await User.update(
+            { push_token: null },
+            { where: { push_token: cleanToken, id: { [Op.ne]: userId } } }
+        );
+
+        user.push_token = cleanToken;
         await user.save();
 
-        console.log(`[Auth] ✓ Registered push token for User #${userId} (${user.email}): ${push_token.slice(0, 20)}...`);
+        console.log(`[Auth] ✓ Registered push token for User #${userId} (${user.email}): ${cleanToken.slice(0, 20)}...`);
 
         return res.status(200).json({
             success: true,
