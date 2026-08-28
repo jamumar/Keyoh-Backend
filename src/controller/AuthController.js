@@ -706,7 +706,6 @@ router.post('/apple', async (req, res) => {
     }
 });
 
-const { ChatAuthMiddleware } = require('../middleware');
 
 router.put('/preferences', ChatAuthMiddleware, async (req, res) => {
     try {
