@@ -7,7 +7,7 @@ const { Op } = require('sequelize')
 const jwt = require("jsonwebtoken");
 const bcrypt = require('bcrypt');
 const { sendEmail, buildPasswordResetEmail, buildWelcomeEmail, buildVerificationOtpEmail } = require('../services/emailService');
-const { CustomerMiddleware } = require('../middleware');
+const { CustomerMiddleware, ChatAuthMiddleware } = require('../middleware');
 const {
     verifyActiveSubscriptionWithRetry,
     mapClientBillingToSnapshot,
@@ -19,7 +19,7 @@ require('dotenv').config()
 
 const router = express.Router()
 
-router.post('/push-token', CustomerMiddleware, async (req, res) => {
+router.post('/push-token', ChatAuthMiddleware, async (req, res) => {
     try {
         const userId = req.user.id;
         const { push_token } = req.body;
