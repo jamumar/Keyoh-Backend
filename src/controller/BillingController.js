@@ -33,6 +33,15 @@ const PRODUCT_CATALOG = {
     entitlement: 'seller_listing',
     period: 'one_time',
   },
+  'keyoh_property_listing_fee': {
+    type: 'listing_fee',
+    tier: 'standard',
+    amountPence: 19900,
+    priceStr: '£199.00',
+    name: 'Seller Property Listing Fee',
+    entitlement: 'seller_listing',
+    period: 'one_time',
+  },
   'keyoh_property_boost_monthly': {
     type: 'boost',
     tier: 'PRIME',

@@ -105,6 +105,10 @@ const Users = sequelize.define("users", {
         type: DataTypes.TEXT,
         allowNull: true,
     },
+    apple_id: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+    },
 });
 
 Users.associate = function (models) {

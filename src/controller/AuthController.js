@@ -595,11 +595,24 @@ router.get('/verify-user', CustomerMiddleware, async (req, res) => {
 // POST /auth/google — Google OAuth ID Token Verification
 router.post('/google', async (req, res) => {
     try {
-        const { idToken, id_token, email, name, role } = req.body;
-        const targetEmail = email || req.body?.user?.email;
-        const targetName = name || req.body?.user?.name || 'Google User';
+        const { idToken, id_token, email, name, avatar, role } = req.body;
+        const rawToken = idToken || id_token;
 
-        if (!targetEmail && !idToken && !id_token) {
+        let decodedToken = null;
+        if (rawToken && typeof rawToken === 'string') {
+            try {
+                decodedToken = jwt.decode(rawToken);
+            } catch (e) {
+                console.warn('[Google Auth] Warning: could not decode raw idToken:', e.message);
+            }
+        }
+
+        const tokenEmail = decodedToken?.email;
+        const targetEmail = (email || req.body?.user?.email || tokenEmail || (decodedToken?.sub ? `google_${decodedToken.sub}@keyoh.app` : null));
+        const targetName = name || req.body?.user?.name || decodedToken?.name || 'Google User';
+        const targetAvatar = avatar || decodedToken?.picture || null;
+
+        if (!targetEmail && !rawToken) {
             return res.status(400).json({
                 success: false,
                 message: 'idToken or email is required for Google Authentication.',
@@ -610,14 +623,18 @@ router.post('/google', async (req, res) => {
         let user = await User.findOne({ where: { email: userEmail } });
 
         if (!user) {
-            const randomPassword = await bcrypt.hash(`google_${Date.now()}`, 10);
+            const randomPassword = await bcrypt.hash(`google_secret_${decodedToken?.sub || Date.now()}`, 10);
             user = await User.create({
                 email: userEmail,
                 name: targetName,
+                avatar: targetAvatar,
                 password: randomPassword,
                 role: role || 'user',
                 email_verified: 1,
             });
+        } else if (targetAvatar && !user.avatar) {
+            user.avatar = targetAvatar;
+            await user.save();
         }
 
         const sellerSecret = process.env.SELLER_TOKEN_STRING || process.env.SELLER_TOKEM_STRING;
@@ -637,11 +654,13 @@ router.post('/google', async (req, res) => {
                 id: user.id,
                 name: user.name,
                 email: user.email,
+                avatar: user.avatar,
                 role: user.role,
                 token,
             },
         });
     } catch (error) {
+        console.error('[Google Auth] ❌ Error in /auth/google:', error.message);
         return res.status(500).json({
             success: false,
             message: error.message,
@@ -652,29 +671,79 @@ router.post('/google', async (req, res) => {
 // POST /auth/apple — Apple Sign-In Identity Token Verification
 router.post('/apple', async (req, res) => {
     try {
-        const { identityToken, identity_token, email, name, role } = req.body;
-        const targetEmail = email || req.body?.user?.email;
-        const targetName = name || req.body?.user?.name || 'Apple User';
+        const { identityToken, identity_token, apple_id, email, name, role } = req.body;
+        const rawToken = identityToken || identity_token;
 
-        if (!targetEmail && !identityToken && !identity_token) {
+        let decodedToken = null;
+        if (rawToken && typeof rawToken === 'string') {
+            try {
+                decodedToken = jwt.decode(rawToken);
+            } catch (e) {
+                console.warn('[Apple Auth] Warning: could not decode raw identityToken:', e.message);
+            }
+        }
+
+        const tokenEmail = decodedToken?.email;
+        const appleSub = apple_id || decodedToken?.sub;
+        const targetEmail = (email || req.body?.user?.email || tokenEmail || (appleSub ? `apple_${appleSub.replace(/[^a-zA-Z0-9]/g, '')}@privaterelay.keyoh.app` : null));
+        const targetName = name || req.body?.user?.name || decodedToken?.name || 'Apple User';
+
+        if (!targetEmail && !rawToken && !appleSub) {
             return res.status(400).json({
                 success: false,
-                message: 'identityToken or email is required for Apple Authentication.',
+                message: 'identityToken, apple_id, or email is required for Apple Authentication.',
             });
         }
 
-        const userEmail = (targetEmail || `apple_${Date.now()}@keyoh.app`).toLowerCase();
-        let user = await User.findOne({ where: { email: userEmail } });
+        let user = null;
+
+        // 1. Primary lookup: Find user by unique Apple ID (sub)
+        if (appleSub) {
+            user = await User.findOne({ where: { apple_id: appleSub } });
+        }
+
+        // 2. Secondary lookup: Find by provided email (and link apple_id if missing)
+        const userEmail = (targetEmail || `apple_${Date.now()}@privaterelay.keyoh.app`).toLowerCase();
+        if (!user && (email || tokenEmail)) {
+            user = await User.findOne({ where: { email: (email || tokenEmail).toLowerCase() } });
+            if (user && appleSub && !user.apple_id) {
+                user.apple_id = appleSub;
+                await user.save();
+            }
+        }
+
+        // 3. Tertiary lookup: Check if fallback private relay email exists
+        if (!user && appleSub) {
+            const fallbackEmail = `apple_${appleSub.replace(/[^a-zA-Z0-9]/g, '')}@privaterelay.keyoh.app`.toLowerCase();
+            user = await User.findOne({ where: { email: fallbackEmail } });
+            if (user && !user.apple_id) {
+                user.apple_id = appleSub;
+                await user.save();
+            }
+        }
+
+        const validRoles = ['user', 'seller', 'agent', 'admin'];
+        const targetRole = validRoles.includes(role) ? role : 'user';
 
         if (!user) {
-            const randomPassword = await bcrypt.hash(`apple_${Date.now()}`, 10);
+            const randomPassword = await bcrypt.hash(`apple_secret_${appleSub || Date.now()}`, 10);
             user = await User.create({
                 email: userEmail,
                 name: targetName,
+                apple_id: appleSub || null,
                 password: randomPassword,
-                role: role || 'user',
+                role: targetRole,
                 email_verified: 1,
             });
+        } else {
+            if (appleSub && !user.apple_id) {
+                user.apple_id = appleSub;
+                await user.save();
+            }
+            if (targetName && targetName !== 'Apple User' && user.name === 'Apple User') {
+                user.name = targetName;
+                await user.save();
+            }
         }
 
         const sellerSecret = process.env.SELLER_TOKEN_STRING || process.env.SELLER_TOKEM_STRING;
@@ -695,13 +764,18 @@ router.post('/apple', async (req, res) => {
                 name: user.name,
                 email: user.email,
                 role: user.role,
+                avatar: user.avatar || null,
+                phone: user.phone || null,
+                agency_name: user.agency_name || null,
+                is_verified_buyer: user.is_verified_buyer || false,
                 token,
             },
         });
     } catch (error) {
+        console.error('[Apple Auth] ❌ Error in /auth/apple:', error);
         return res.status(500).json({
             success: false,
-            message: error.message,
+            message: error.message || 'Apple Sign-In processing failed on server',
         });
     }
 });

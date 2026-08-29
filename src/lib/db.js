@@ -36,6 +36,7 @@ async function connectDB() {
         const migrations = [
             'ALTER TABLE users ADD COLUMN push_token VARCHAR(255) NULL;',
             'ALTER TABLE users ADD COLUMN avatar TEXT NULL;',
+            'ALTER TABLE users ADD COLUMN apple_id VARCHAR(255) NULL;',
         ];
         for (const sql of migrations) {
             try { await sequelize.query(sql); } catch (e) { /* Column already exists */ }
