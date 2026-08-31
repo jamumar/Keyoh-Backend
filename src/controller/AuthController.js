@@ -625,16 +625,23 @@ router.post('/google', async (req, res) => {
 
         if (!user) {
             const randomPassword = await bcrypt.hash(`google_secret_${decodedToken?.sub || Date.now()}`, 10);
+            const initialRole = role === 'buyer' ? 'user' : (role || 'user');
             user = await User.create({
                 email: userEmail,
                 name: targetName,
                 avatar: targetAvatar,
                 password: randomPassword,
-                role: role || 'user',
+                role: initialRole,
                 email_verified: 1,
             });
-        } else if (targetAvatar && !user.avatar) {
-            user.avatar = targetAvatar;
+        } else {
+            const requestedRole = role === 'buyer' ? 'user' : role;
+            if (requestedRole && user.role !== 'admin' && (requestedRole === 'user' || requestedRole === 'seller' || requestedRole === 'agent')) {
+                user.role = requestedRole;
+            }
+            if (targetAvatar && !user.avatar) {
+                user.avatar = targetAvatar;
+            }
             await user.save();
         }
 
@@ -716,6 +723,7 @@ router.get('/google/callback', async (req, res) => {
         }
 
         let user = await User.findOne({ where: { email } });
+        const targetRole = role === 'buyer' ? 'user' : (role || 'user');
         if (!user) {
             const randomPassword = await bcrypt.hash(`google_secret_${Date.now()}`, 10);
             user = await User.create({
@@ -723,11 +731,16 @@ router.get('/google/callback', async (req, res) => {
                 name,
                 avatar,
                 password: randomPassword,
-                role: role || 'user',
+                role: targetRole,
                 email_verified: 1,
             });
-        } else if (avatar && !user.avatar) {
-            user.avatar = avatar;
+        } else {
+            if (targetRole && user.role !== 'admin' && (targetRole === 'user' || targetRole === 'seller' || targetRole === 'agent')) {
+                user.role = targetRole;
+            }
+            if (avatar && !user.avatar) {
+                user.avatar = avatar;
+            }
             await user.save();
         }
 
