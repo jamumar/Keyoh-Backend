@@ -404,10 +404,7 @@ router.post('/', PropertyOwnerMiddleware, uploadProperty, async (req, res) => {
             });
         }
 
-        const isAgent = req.user.role === 'agent';
-        const initialModerationStatus = isAgent ? 'pending' : 'clean';
-
-        console.log('[property] Saving property to database (moderation_status:', initialModerationStatus, ')');
+        console.log('[property] Saving property to database for instant publishing...');
         const newProperty = await Properties.create({
             address: address || 'Property Listing',
             post_code: post_code || 'SW1A 1AA',
@@ -422,7 +419,7 @@ router.post('/', PropertyOwnerMiddleware, uploadProperty, async (req, res) => {
             videos: parsedVideos,
             agent_id: ownerId,
             status: 'available',
-            moderation_status: initialModerationStatus,
+            moderation_status: 'clean',
         });
 
         console.log('[property] 🎉 Property created successfully! ID:', newProperty.id);

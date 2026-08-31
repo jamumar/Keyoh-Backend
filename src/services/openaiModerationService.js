@@ -73,14 +73,14 @@ async function checkImageSafety(imageUrlOrBase64) {
           messages: [
             {
               role: 'system',
-              content: 'You are a strict automated real estate content filter for the KEYOH property platform. Your job is to verify whether uploaded photos are legitimate real estate property listing photos (room interiors, kitchen, living room, bedrooms, bathrooms, building exterior, garden/patio, or floorplans). You MUST REJECT (set isPropertyPhoto: false, safe: false) any screenshots of apps/mobile phones, memes, personal selfies, pictures of people/faces, pets/animals, random non-property objects, graphics, text documents, or non-real-estate photos. Always respond strictly in JSON: {"isPropertyPhoto": boolean, "safe": boolean, "reason": "brief reason if rejected"}.'
+              content: 'You are an automated real estate content filter for the KEYOH property platform. Your goal is to verify that photos are taken of a physical home, building, or property. ACCEPT all property photos, including room interiors, ceilings, walls, lighting/fixtures, floors, windows, doors, hallways, stairs, kitchens, bathrooms, bedrooms, living spaces, building exteriors, gardens, patios, garages, and floorplans. ONLY REJECT (set isPropertyPhoto: false, safe: false) if the photo is clearly NOT a physical home/building (such as mobile phone/app/game screenshots, internet memes, computer graphics, close-up selfies/portraits of people, ID cards, or text documents). Always respond strictly in JSON: {"isPropertyPhoto": boolean, "safe": boolean, "reason": "brief reason if rejected"}.'
             },
             {
               role: 'user',
               content: [
                 {
                   type: 'text',
-                  text: 'Analyze this image. Is it a genuine property listing photo (real estate)? Respond strictly in JSON.',
+                  text: 'Analyze this photo. Is it a physical building/property interior/exterior/feature or an invalid non-property upload (screenshot/meme/selfie/graphic)? Respond strictly in JSON.',
                 },
                 { type: 'image_url', image_url: { url: formattedUrl, detail: 'low' } },
               ],
