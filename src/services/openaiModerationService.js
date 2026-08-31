@@ -61,6 +61,7 @@ async function checkImageSafety(imageUrlOrBase64) {
       const isDataUrl = imageUrlOrBase64.startsWith('data:') || imageUrlOrBase64.startsWith('http');
       const formattedUrl = isDataUrl ? imageUrlOrBase64 : `data:image/jpeg;base64,${imageUrlOrBase64}`;
 
+      console.log('[ModerationService] 🔍 Calling GPT-4o Vision for photo validation...');
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -71,13 +72,17 @@ async function checkImageSafety(imageUrlOrBase64) {
           model: 'gpt-4o-mini',
           messages: [
             {
+              role: 'system',
+              content: 'You are a strict automated real estate content filter for the KEYOH property platform. Your job is to verify whether uploaded photos are legitimate real estate property listing photos (room interiors, kitchen, living room, bedrooms, bathrooms, building exterior, garden/patio, or floorplans). You MUST REJECT (set isPropertyPhoto: false, safe: false) any screenshots of apps/mobile phones, memes, personal selfies, pictures of people/faces, pets/animals, random non-property objects, graphics, text documents, or non-real-estate photos. Always respond strictly in JSON: {"isPropertyPhoto": boolean, "safe": boolean, "reason": "brief reason if rejected"}.'
+            },
+            {
               role: 'user',
               content: [
                 {
                   type: 'text',
-                  text: 'Analyze this photo for a UK property app listing. Determine if it is a valid property photo (room interior, building exterior, garden, kitchen, bathroom, floorplan) or an invalid upload (such as a mobile app screenshot, meme, ID document, or non-property image). Respond in JSON format: {"safe": true/false, "isPropertyPhoto": true/false, "reason": "..."}',
+                  text: 'Analyze this image. Is it a genuine property listing photo (real estate)? Respond strictly in JSON.',
                 },
-                { type: 'image_url', image_url: { url: formattedUrl } },
+                { type: 'image_url', image_url: { url: formattedUrl, detail: 'low' } },
               ],
             },
           ],
@@ -87,14 +92,21 @@ async function checkImageSafety(imageUrlOrBase64) {
 
       if (response.ok) {
         const payload = await response.json();
-        const res = JSON.parse(payload.choices[0].message.content);
+        const contentStr = payload.choices?.[0]?.message?.content || '{}';
+        const res = JSON.parse(contentStr);
+        console.log('[ModerationService] 👁️ GPT-4o Vision response:', JSON.stringify(res));
+
         if (res.safe === false || res.isPropertyPhoto === false) {
+          console.warn('[ModerationService] ❌ Image REJECTED by GPT Vision:', res.reason);
           return {
             flagged: true,
-            isPropertyPhoto: Boolean(res.isPropertyPhoto),
-            reason: res.reason || 'Image is not a valid property photo (app screenshot or non-property image detected)',
+            isPropertyPhoto: false,
+            reason: res.reason || 'Image is not a valid property photo. Please upload genuine property photos only.',
           };
         }
+      } else {
+        const errText = await response.text();
+        console.error('[ModerationService] ❌ OpenAI API HTTP error:', response.status, errText);
       }
     } catch (e) {
       console.warn('[ModerationService] AI Image Vision scan error:', e.message);
