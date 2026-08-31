@@ -74,8 +74,8 @@ router.get('/buyer/status', ChatAuthMiddleware, async (req, res) => {
       });
     }
 
-    // If Stripe Identity check is pending, actively poll Stripe session status
-    if (stripe && user.stripe_identity_status === 'pending' && user.stripe_identity_session_id) {
+    // If Stripe Identity check is pending or not yet passed, actively poll Stripe session status
+    if (stripe && user.stripe_identity_status !== 'pass' && user.stripe_identity_session_id) {
       try {
         const session = await stripe.identity.verificationSessions.retrieve(user.stripe_identity_session_id);
         console.log(`[StripeIdentity] Polled Stripe session ${user.stripe_identity_session_id} -> status: "${session.status}" for User #${user.id}`);
@@ -89,9 +89,15 @@ router.get('/buyer/status', ChatAuthMiddleware, async (req, res) => {
           user.is_verified_buyer = true;
           await user.save();
           console.log(`[StripeIdentity] 🎉 User #${user.id} (${user.email}) Stripe Identity status set to PASS!`);
-        } else if (session.status === 'requires_input') {
+        } else if (session.status === 'canceled') {
           user.stripe_identity_status = 'fail';
           await user.save();
+        } else {
+          // In requires_input state, keep status pending awaiting user completion
+          if (user.stripe_identity_status !== 'pending') {
+            user.stripe_identity_status = 'pending';
+            await user.save();
+          }
         }
       } catch (pollErr) {
         console.warn('[StripeIdentity] Status poll error:', pollErr.message);
