@@ -28,7 +28,8 @@ function scoreFromReviewRating(avgRating) {
     return 30;
 }
 
-function scoreFromCompletionRate(completionRate) {
+function scoreFromCompletionRate(completionRate, listingCount = 1) {
+    if (listingCount === 0 || completionRate == null) return 100;
     if (completionRate >= 80) return 100;
     if (completionRate >= 60) return 85;
     if (completionRate >= 40) return 70;
@@ -36,8 +37,11 @@ function scoreFromCompletionRate(completionRate) {
     return 30;
 }
 
-function calculateKeyohScore({ responseTimeScore, reviewScore, completionRate }) {
-    const completionScore = scoreFromCompletionRate(completionRate);
+function calculateKeyohScore({ responseTimeScore, reviewScore, completionRate, listingCount }) {
+    if (listingCount === 0 && responseTimeScore === DEFAULT_RESPONSE_SCORE && reviewScore === DEFAULT_REVIEW_SCORE) {
+        return 100; // Starting baseline score for new agents
+    }
+    const completionScore = scoreFromCompletionRate(completionRate, listingCount);
     const total =
         responseTimeScore * RESPONSE_WEIGHT +
         reviewScore * REVIEW_WEIGHT +
@@ -116,6 +120,7 @@ async function recalculateAgentStats(agentId) {
         responseTimeScore,
         reviewScore,
         completionRate,
+        listingCount,
     });
 
     const [stats] = await AgentStats.upsert({

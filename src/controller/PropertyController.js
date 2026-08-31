@@ -4,6 +4,7 @@ const { Op } = require('sequelize');
 const { Properties, PropertyType, TenureType, Users } = require('../models');
 const { AgentMiddlware, PropertyOwnerMiddleware } = require('../middleware');
 const { buildPropertyQueryOptions } = require('../services/propertyFilterService');
+const { checkImageSafety } = require('../services/openaiModerationService');
 
 // Get all properties
 router.get('/', async (req, res) => {
@@ -306,6 +307,22 @@ router.post('/', PropertyOwnerMiddleware, uploadProperty, async (req, res) => {
             if (uploadedUrl) {
                 imageUrls.push(uploadedUrl);
             }
+        }
+
+        // AI Image Verification via GPT-4o Vision if OPENAI_API_KEY is configured
+        if (process.env.OPENAI_API_KEY && imageUrls.length > 0) {
+            console.log(`[property] Running AI Vision check on ${imageUrls.length} image(s)...`);
+            for (const imgUrl of imageUrls) {
+                const scanResult = await checkImageSafety(imgUrl);
+                if (scanResult.flagged) {
+                    console.warn('[property] ❌ AI Moderation Flagged Image:', scanResult.reason);
+                    return res.status(400).json({
+                        success: false,
+                        message: scanResult.reason || 'Only genuine property photos (rooms, exterior, garden, kitchen, bathroom, floorplans) are allowed.',
+                    });
+                }
+            }
+            console.log('[property] ✓ AI Vision scan passed for all photos');
         }
 
         // Videos → Cloudflare Stream
