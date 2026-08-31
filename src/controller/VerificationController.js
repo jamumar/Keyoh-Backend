@@ -50,6 +50,7 @@ const calculateVerifiedStatus = (user) => {
 
 // GET /verification/buyer/status
 router.get('/buyer/status', ChatAuthMiddleware, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   try {
     const user = await Users.findByPk(req.user.id, {
       attributes: [
@@ -59,6 +60,7 @@ router.get('/buyer/status', ChatAuthMiddleware, async (req, res) => {
         'email_verified',
         'phone_verified',
         'stripe_identity_status',
+        'stripe_identity_session_id',
         'stripe_identity_date',
         'buyer_position',
         'is_verified_buyer',
