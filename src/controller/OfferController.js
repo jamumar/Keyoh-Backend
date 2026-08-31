@@ -233,7 +233,12 @@ router.get('/received', ChatAuthMiddleware, async (req, res) => {
         const userId = parseInt(req.user.id, 10);
 
         const offers = await Offers.findAll({
-            where: { seller_id: userId },
+            where: {
+                [Op.or]: [
+                    { seller_id: userId },
+                    { '$property.agent_id$': userId },
+                ],
+            },
             include: [
                 { model: Properties, as: 'property' },
                 { model: Users, as: 'buyer' },
@@ -252,8 +257,8 @@ router.get('/received', ChatAuthMiddleware, async (req, res) => {
     }
 });
 
-// 3. Get offers submitted by buyer
-router.get('/my-offers', ChatAuthMiddleware, async (req, res) => {
+// 3. Get sent offers (Buyer auth)
+router.get('/sent', ChatAuthMiddleware, async (req, res) => {
     try {
         const userId = parseInt(req.user.id, 10);
 
@@ -277,7 +282,7 @@ router.get('/my-offers', ChatAuthMiddleware, async (req, res) => {
     }
 });
 
-// 4. Accept an offer (Seller auth)
+// 4. Accept an offer (Seller / Agent auth)
 router.post('/:id/accept', ChatAuthMiddleware, async (req, res) => {
     try {
         const userId = parseInt(req.user.id, 10);
@@ -291,8 +296,9 @@ router.post('/:id/accept', ChatAuthMiddleware, async (req, res) => {
             return res.status(404).json({ success: false, message: 'Offer not found' });
         }
 
-        if (parseInt(offer.seller_id, 10) !== userId) {
-            return res.status(403).json({ success: false, message: 'Only the listing owner can accept this offer' });
+        const isAuthorized = parseInt(offer.seller_id, 10) === userId || (offer.property && parseInt(offer.property.agent_id, 10) === userId);
+        if (!isAuthorized) {
+            return res.status(403).json({ success: false, message: 'Only the listing owner or managing agent can accept this offer' });
         }
 
         offer.status = 'accepted';
@@ -311,7 +317,7 @@ router.post('/:id/accept', ChatAuthMiddleware, async (req, res) => {
         const formatted = formatOffer(offer);
 
         // Notify chat
-        const acceptText = `OFFER ACCEPTED!\n\nYour offer of ${formatted.formattedAmount} for ${formatted.propertyAddress} was ACCEPTED by the seller!\n\nLegal Next Step: Please instruct your solicitors to proceed with conveyancing.`;
+        const acceptText = `OFFER ACCEPTED!\n\nYour offer of ${formatted.formattedAmount} for ${formatted.propertyAddress} was ACCEPTED!\n\nLegal Next Step: Please instruct your solicitors to proceed with conveyancing.`;
         await appendSystemChatMessage({
             buyerId: offer.buyer_id,
             sellerId: offer.seller_id,
@@ -356,8 +362,9 @@ router.post('/:id/reject', ChatAuthMiddleware, async (req, res) => {
             return res.status(404).json({ success: false, message: 'Offer not found' });
         }
 
-        if (parseInt(offer.seller_id, 10) !== userId) {
-            return res.status(403).json({ success: false, message: 'Only the listing owner can reject this offer' });
+        const isAuthorized = parseInt(offer.seller_id, 10) === userId || (offer.property && parseInt(offer.property.agent_id, 10) === userId);
+        if (!isAuthorized) {
+            return res.status(403).json({ success: false, message: 'Only the listing owner or managing agent can reject this offer' });
         }
 
         offer.status = 'rejected';
@@ -368,7 +375,7 @@ router.post('/:id/reject', ChatAuthMiddleware, async (req, res) => {
 
         const formatted = formatOffer(offer);
 
-        const rejectText = `Offer of ${formatted.formattedAmount} for ${formatted.propertyAddress} was declined by the seller.`;
+        const rejectText = `Offer of ${formatted.formattedAmount} for ${formatted.propertyAddress} was declined.`;
         await appendSystemChatMessage({
             buyerId: offer.buyer_id,
             sellerId: offer.seller_id,
@@ -396,7 +403,7 @@ router.post('/:id/reject', ChatAuthMiddleware, async (req, res) => {
     }
 });
 
-// 6. Counter an offer (Seller submits counter amount)
+// 6. Counter an offer (Seller / Agent submits counter amount)
 router.post('/:id/counter', ChatAuthMiddleware, async (req, res) => {
     try {
         const userId = parseInt(req.user.id, 10);
@@ -416,8 +423,9 @@ router.post('/:id/counter', ChatAuthMiddleware, async (req, res) => {
             return res.status(404).json({ success: false, message: 'Offer not found' });
         }
 
-        if (parseInt(offer.seller_id, 10) !== userId) {
-            return res.status(403).json({ success: false, message: 'Only the listing owner can counter this offer' });
+        const isAuthorized = parseInt(offer.seller_id, 10) === userId || (offer.property && parseInt(offer.property.agent_id, 10) === userId);
+        if (!isAuthorized) {
+            return res.status(403).json({ success: false, message: 'Only the listing owner or managing agent can counter this offer' });
         }
 
         offer.counter_amount = numericCounter;
@@ -429,7 +437,7 @@ router.post('/:id/counter', ChatAuthMiddleware, async (req, res) => {
 
         const formatted = formatOffer(offer);
 
-        const counterText = `COUNTER OFFER RECEIVED!\n\nThe seller counter-offered ${formatted.formattedCounterAmount} for ${formatted.propertyAddress}${message ? `\n\n"${message.trim()}"` : ''}`;
+        const counterText = `COUNTER OFFER RECEIVED!\n\nA counter-offer of ${formatted.formattedCounterAmount} for ${formatted.propertyAddress} was submitted${message ? `\n\n"${message.trim()}"` : ''}`;
         await appendSystemChatMessage({
             buyerId: offer.buyer_id,
             sellerId: offer.seller_id,
@@ -458,7 +466,7 @@ router.post('/:id/counter', ChatAuthMiddleware, async (req, res) => {
     }
 });
 
-// 7. Complete deal / Mark property as SOLD (Frees 1-active-listing slot for Private Seller)
+// 7. Complete deal / Mark property as SOLD
 router.post('/:id/complete', ChatAuthMiddleware, async (req, res) => {
     try {
         const userId = parseInt(req.user.id, 10);
@@ -472,8 +480,9 @@ router.post('/:id/complete', ChatAuthMiddleware, async (req, res) => {
             return res.status(404).json({ success: false, message: 'Offer not found' });
         }
 
-        if (parseInt(offer.seller_id, 10) !== userId) {
-            return res.status(403).json({ success: false, message: 'Only the listing owner can complete this sale' });
+        const isAuthorized = parseInt(offer.seller_id, 10) === userId || (offer.property && parseInt(offer.property.agent_id, 10) === userId);
+        if (!isAuthorized) {
+            return res.status(403).json({ success: false, message: 'Only the listing owner or managing agent can complete this sale' });
         }
 
         offer.status = 'completed_sold';

@@ -108,10 +108,70 @@ async function checkImageSafety(imageUrlOrBase64) {
         const errText = await response.text();
         console.error('[ModerationService] ❌ OpenAI API HTTP error:', response.status, errText);
       }
-    } catch (e) {
-      console.warn('[ModerationService] AI Image Vision scan error:', e.message);
-    }
+async function checkImagesBatchSafety(imageUrls = []) {
+  const openAiKey = process.env.OPENAI_API_KEY;
+  if (!openAiKey || !Array.isArray(imageUrls) || imageUrls.length === 0) {
+    return { flagged: false, isPropertyPhoto: true };
   }
+
+  try {
+    const formattedImages = imageUrls.map(url => {
+      const isDataUrl = url.startsWith('data:') || url.startsWith('http');
+      const formattedUrl = isDataUrl ? url : `data:image/jpeg;base64,${url}`;
+      return { type: 'image_url', image_url: { url: formattedUrl, detail: 'low' } };
+    });
+
+    console.log(`[ModerationService] 🔍 Calling GPT-4o Vision batch validation for ${imageUrls.length} photo(s) in a single request...`);
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${openAiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an automated real estate content filter for the KEYOH property platform. Inspect ALL provided images. ACCEPT all real property photos (room interiors, ceilings, walls, lighting/fixtures, floors, windows, doors, hallways, stairs, kitchens, bathrooms, bedrooms, living spaces, building exteriors, gardens, patios, garages, and floorplans). ONLY REJECT (set isPropertyPhoto: false, safe: false) if ANY image is clearly NOT a physical home/building (such as mobile phone/app/game screenshots, internet memes, computer graphics, close-up selfies/portraits of people, ID cards, or text documents). Always respond strictly in JSON: {"isPropertyPhoto": boolean, "safe": boolean, "reason": "brief explanation if any image is rejected"}.'
+          },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: `Analyze these ${imageUrls.length} photos together for a real estate listing. Are they all legitimate physical building/property photos or are there invalid non-property uploads (screenshots/memes/selfies/graphics)? Respond strictly in JSON.`,
+              },
+              ...formattedImages,
+            ],
+          },
+        ],
+        response_format: { type: 'json_object' },
+      }),
+    });
+
+    if (response.ok) {
+      const payload = await response.json();
+      const contentStr = payload.choices?.[0]?.message?.content || '{}';
+      const res = JSON.parse(contentStr);
+      console.log('[ModerationService] 👁️ GPT-4o Vision batch response:', JSON.stringify(res));
+
+      if (res.safe === false || res.isPropertyPhoto === false) {
+        console.warn('[ModerationService] ❌ Batch Image REJECTED by GPT Vision:', res.reason);
+        return {
+          flagged: true,
+          isPropertyPhoto: false,
+          reason: res.reason || 'One or more images are not valid property photos. Please upload genuine property photos only.',
+        };
+      }
+    } else {
+      const errText = await response.text();
+      console.error('[ModerationService] ❌ OpenAI API HTTP error:', response.status, errText);
+    }
+  } catch (e) {
+    console.warn('[ModerationService] AI Image Vision batch scan error:', e.message);
+  }
+
   return { flagged: false, isPropertyPhoto: true };
 }
 
@@ -155,4 +215,4 @@ async function checkVideoSafety(streamId, thumbnailUrl) {
   return { flagged: false };
 }
 
-module.exports = { checkContentSafety, checkImageSafety, checkVideoSafety };
+module.exports = { checkContentSafety, checkImageSafety, checkImagesBatchSafety, checkVideoSafety };

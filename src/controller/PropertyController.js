@@ -4,7 +4,7 @@ const { Op } = require('sequelize');
 const { Properties, PropertyType, TenureType, Users } = require('../models');
 const { AgentMiddlware, PropertyOwnerMiddleware } = require('../middleware');
 const { buildPropertyQueryOptions } = require('../services/propertyFilterService');
-const { checkImageSafety } = require('../services/openaiModerationService');
+const { checkImageSafety, checkImagesBatchSafety } = require('../services/openaiModerationService');
 
 // Get all properties
 router.get('/', async (req, res) => {
@@ -260,18 +260,18 @@ router.post('/', PropertyOwnerMiddleware, uploadProperty, async (req, res) => {
         const path = require('path');
         const fs = require('fs');
 
-        for (const file of imageFiles) {
+        console.log(`[property] Uploading ${imageFiles.length} photo(s) in parallel...`);
+        const uploadPromises = imageFiles.map(async (file, idx) => {
             let uploadedUrl = null;
 
             // Attempt Cloudflare Images upload if configured
             if (isImagesConfigured()) {
                 try {
-                    console.log('[property] Uploading photo to Cloudflare Images...', file.originalname || 'photo');
                     const uploaded = await uploadImageFile(file);
                     uploadedUrl = uploaded?.url;
-                    console.log('[property] ✓ Cloudflare photo uploaded:', uploadedUrl);
+                    console.log(`[property] ✓ Cloudflare photo #${idx + 1} uploaded:`, uploadedUrl);
                 } catch (error) {
-                    console.warn('[property] ⚠️ Cloudflare Images upload failed:', error.message);
+                    console.warn(`[property] ⚠️ Cloudflare Images upload failed for #${idx + 1}:`, error.message);
                 }
             }
 
@@ -295,34 +295,32 @@ router.post('/', PropertyOwnerMiddleware, uploadProperty, async (req, res) => {
                         fs.writeFileSync(filepath, fileBuffer);
                         const host = req.get('host') || '10.113.151.162:5000';
                         uploadedUrl = `${req.protocol || 'http'}://${host}/public/uploads/${filename}`;
-                        console.log('[property] ✓ Photo saved locally as fallback:', uploadedUrl);
+                        console.log(`[property] ✓ Photo #${idx + 1} saved locally as fallback:`, uploadedUrl);
                     } else {
-                        console.error('[property] Could not read photo data buffer:', file.originalname || file.name);
+                        console.error(`[property] Could not read photo data buffer for #${idx + 1}:`, file.originalname || file.name);
                     }
                 } catch (fallbackErr) {
-                    console.error('[property] ❌ Local photo save error:', fallbackErr.message);
+                    console.error(`[property] ❌ Local photo save error for #${idx + 1}:`, fallbackErr.message);
                 }
             }
 
-            if (uploadedUrl) {
-                imageUrls.push(uploadedUrl);
-            }
-        }
+            return uploadedUrl;
+        });
 
-        // AI Image Verification via GPT-4o Vision if OPENAI_API_KEY is configured
+        const uploadedResults = await Promise.all(uploadPromises);
+        const imageUrls = uploadedResults.filter(Boolean);
+
+        // AI Image Verification via GPT-4o Vision batch scan in a single API call
         if (process.env.OPENAI_API_KEY && imageUrls.length > 0) {
-            console.log(`[property] Running AI Vision check on ${imageUrls.length} image(s)...`);
-            for (const imgUrl of imageUrls) {
-                const scanResult = await checkImageSafety(imgUrl);
-                if (scanResult.flagged) {
-                    console.warn('[property] ❌ AI Moderation Flagged Image:', scanResult.reason);
-                    return res.status(400).json({
-                        success: false,
-                        message: scanResult.reason || 'Only genuine property photos (rooms, exterior, garden, kitchen, bathroom, floorplans) are allowed.',
-                    });
-                }
+            const scanResult = await checkImagesBatchSafety(imageUrls);
+            if (scanResult.flagged) {
+                console.warn('[property] ❌ AI Moderation Flagged Image:', scanResult.reason);
+                return res.status(400).json({
+                    success: false,
+                    message: scanResult.reason || 'Only genuine property photos (rooms, exterior, garden, kitchen, bathroom, floorplans) are allowed.',
+                });
             }
-            console.log('[property] ✓ AI Vision scan passed for all photos');
+            console.log('[property] ✓ AI Vision batch scan passed for all photos');
         }
 
         // Videos → Cloudflare Stream
