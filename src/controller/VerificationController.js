@@ -80,8 +80,7 @@ router.get('/buyer/status', ChatAuthMiddleware, async (req, res) => {
         const session = await stripe.identity.verificationSessions.retrieve(user.stripe_identity_session_id);
         console.log(`[StripeIdentity] Polled Stripe session ${user.stripe_identity_session_id} -> status: "${session.status}" for User #${user.id}`);
 
-        // If verified, or in test mode completed submit (processing), mark as pass
-        if (session.status === 'verified' || (session.status === 'processing' && process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_'))) {
+        if (session.status === 'verified') {
           user.stripe_identity_status = 'pass';
           user.stripe_identity_date = new Date();
           user.email_verified = true;
@@ -89,11 +88,18 @@ router.get('/buyer/status', ChatAuthMiddleware, async (req, res) => {
           user.is_verified_buyer = true;
           await user.save();
           console.log(`[StripeIdentity] 🎉 User #${user.id} (${user.email}) Stripe Identity status set to PASS!`);
+
+          // Send push notification to user
+          sendPushToUser(user.id, {
+            title: 'KEYOH | Identity Verified ✓',
+            body: 'Congratulations! Your Stripe Identity check passed. Your Verified Buyer status is active.',
+            data: { type: 'verification_passed', screen: 'VerifiedBuyer' },
+          });
         } else if (session.status === 'canceled') {
           user.stripe_identity_status = 'fail';
           await user.save();
         } else {
-          // In requires_input state, keep status pending awaiting user completion
+          // 'processing' and 'requires_input' remain 'pending'
           if (user.stripe_identity_status !== 'pending') {
             user.stripe_identity_status = 'pending';
             await user.save();
@@ -267,16 +273,19 @@ router.post('/stripe-identity/webhook', async (req, res) => {
       const userId = session?.metadata?.user_id;
       if (userId) {
         const user = await Users.findByPk(userId);
+        if (user && user.stripe_identity_status !== 'pass') {
+          user.stripe_identity_status = 'pending';
+          await user.save();
+        }
+      }
+    } else if (event?.type === 'identity.verification_session.canceled') {
+      const session = event.data?.object;
+      const userId = session?.metadata?.user_id;
+      if (userId) {
+        const user = await Users.findByPk(userId);
         if (user) {
           user.stripe_identity_status = 'fail';
           await user.save();
-
-          // Dispatch push notification to user
-          sendPushToUser(user.id, {
-            title: 'KEYOH | Verification Action Needed ⚠️',
-            body: 'Your identity check requires input. Please re-upload a clear photo of your ID document.',
-            data: { type: 'verification_failed', screen: 'VerifiedBuyer' },
-          });
         }
       }
     }
