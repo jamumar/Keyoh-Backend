@@ -108,6 +108,13 @@ async function checkImageSafety(imageUrlOrBase64) {
         const errText = await response.text();
         console.error('[ModerationService] ❌ OpenAI API HTTP error:', response.status, errText);
       }
+    } catch (e) {
+      console.warn('[ModerationService] AI Image Vision scan error:', e.message);
+    }
+  }
+  return { flagged: false, isPropertyPhoto: true };
+}
+
 async function checkImagesBatchSafety(imageUrls = []) {
   const openAiKey = process.env.OPENAI_API_KEY;
   if (!openAiKey || !Array.isArray(imageUrls) || imageUrls.length === 0) {

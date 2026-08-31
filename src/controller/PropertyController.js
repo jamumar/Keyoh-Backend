@@ -254,9 +254,6 @@ router.post('/', PropertyOwnerMiddleware, uploadProperty, async (req, res) => {
             });
         }
 
-        const imageUrls = [];
-        const imageErrors = [];
-
         const path = require('path');
         const fs = require('fs');
 
