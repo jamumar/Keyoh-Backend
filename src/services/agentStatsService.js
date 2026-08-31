@@ -2,7 +2,8 @@ const { Properties, Users, AgentStats } = require('../models');
 const { getPendingHandoversForAgent } = require('./handoverService');
 
 const DEFAULT_RESPONSE_SCORE = 70;
-const DEFAULT_REVIEW_SCORE = 75;
+const DEFAULT_REVIEW_SCORE = 70;
+const DEFAULT_COMPLETION_SCORE = 70;
 
 const RESPONSE_WEIGHT = 0.4;
 const REVIEW_WEIGHT = 0.35;
@@ -28,8 +29,8 @@ function scoreFromReviewRating(avgRating) {
     return 30;
 }
 
-function scoreFromCompletionRate(completionRate, listingCount = 1) {
-    if (listingCount === 0 || completionRate == null) return 100;
+function scoreFromCompletionRate(completionRate, listingCount = 0) {
+    if (listingCount === 0 || completionRate == null) return DEFAULT_COMPLETION_SCORE;
     if (completionRate >= 80) return 100;
     if (completionRate >= 60) return 85;
     if (completionRate >= 40) return 70;
@@ -38,9 +39,6 @@ function scoreFromCompletionRate(completionRate, listingCount = 1) {
 }
 
 function calculateKeyohScore({ responseTimeScore, reviewScore, completionRate, listingCount }) {
-    if (listingCount === 0 && responseTimeScore === DEFAULT_RESPONSE_SCORE && reviewScore === DEFAULT_REVIEW_SCORE) {
-        return 100; // Starting baseline score for new agents
-    }
     const completionScore = scoreFromCompletionRate(completionRate, listingCount);
     const total =
         responseTimeScore * RESPONSE_WEIGHT +
@@ -163,11 +161,7 @@ async function getDashboardStats(agentId, agentEmail) {
         completionRate,
     } = await getAgentPropertyMetrics(agentId);
 
-    let stats = await AgentStats.findOne({ where: { agent_id: agentId } });
-
-    if (!stats) {
-        stats = await recalculateAgentStats(agentId);
-    }
+    const stats = await recalculateAgentStats(agentId);
 
     const pendingHandovers = agentEmail
         ? await getPendingHandoversForAgent(agentEmail)
