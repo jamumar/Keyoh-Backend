@@ -668,6 +668,93 @@ router.post('/google', async (req, res) => {
     }
 });
 
+// GET /auth/google — Initiates OAuth 2.0 Web flow with custom domain
+router.get('/google', (req, res) => {
+    const role = req.query.role || 'user';
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'https://keyoh.app/api/auth/google/callback';
+    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent('openid profile email')}&prompt=select_account&state=${encodeURIComponent(role)}`;
+    return res.redirect(googleAuthUrl);
+});
+
+// GET /auth/google/callback — Handles OAuth 2.0 callback and returns to keyoh:// scheme
+router.get('/google/callback', async (req, res) => {
+    const { code, state: role, error } = req.query;
+    if (error || !code) {
+        return res.redirect(`keyoh://oauthredirect?error=${encodeURIComponent(error || 'Google login cancelled')}`);
+    }
+
+    try {
+        const clientId = process.env.GOOGLE_CLIENT_ID;
+        const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+        const redirectUri = process.env.GOOGLE_REDIRECT_URI || 'https://keyoh.app/api/auth/google/callback';
+
+        const tokenRes = await axios.post('https://oauth2.googleapis.com/token', {
+            code,
+            client_id: clientId,
+            client_secret: clientSecret,
+            redirect_uri: redirectUri,
+            grant_type: 'authorization_code',
+        });
+
+        const { access_token, id_token } = tokenRes.data;
+        let profile = {};
+        if (access_token) {
+            const userinfoRes = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+                headers: { Authorization: `Bearer ${access_token}` },
+            });
+            profile = userinfoRes.data;
+        }
+
+        const email = (profile.email || (id_token ? jwt.decode(id_token)?.email : null) || '').toLowerCase();
+        const name = profile.name || (id_token ? jwt.decode(id_token)?.name : 'Google User');
+        const avatar = profile.picture || null;
+
+        if (!email) {
+            return res.redirect(`keyoh://oauthredirect?error=${encodeURIComponent('Could not retrieve email from Google profile')}`);
+        }
+
+        let user = await User.findOne({ where: { email } });
+        if (!user) {
+            const randomPassword = await bcrypt.hash(`google_secret_${Date.now()}`, 10);
+            user = await User.create({
+                email,
+                name,
+                avatar,
+                password: randomPassword,
+                role: role || 'user',
+                email_verified: 1,
+            });
+        } else if (avatar && !user.avatar) {
+            user.avatar = avatar;
+            await user.save();
+        }
+
+        const sellerSecret = process.env.SELLER_TOKEN_STRING || process.env.SELLER_TOKEM_STRING;
+        const token_string = user.role == 'admin' ? process.env.ADMIN_TOKEN_STRING : user.role == 'seller' ? sellerSecret : user.role == 'agent' ? process.env.AGENT_TOKEN_STRING : process.env.USER_TOKEN_STRING;
+
+        const token = jwt.sign(
+            { id: user.id, role: user.role, email: user.email },
+            token_string,
+            { expiresIn: '30d' }
+        );
+
+        const safeUserData = {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            avatar: user.avatar,
+            role: user.role,
+            token,
+        };
+
+        return res.redirect(`keyoh://oauthredirect?token=${token}&user=${encodeURIComponent(JSON.stringify(safeUserData))}`);
+    } catch (err) {
+        console.error('[Google Callback] ❌ Error:', err.response?.data || err.message);
+        return res.redirect(`keyoh://oauthredirect?error=${encodeURIComponent(err.message || 'Google authentication failed')}`);
+    }
+});
+
 // POST /auth/apple — Apple Sign-In Identity Token Verification
 router.post('/apple', async (req, res) => {
     try {

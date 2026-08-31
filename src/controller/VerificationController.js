@@ -72,6 +72,27 @@ router.get('/buyer/status', ChatAuthMiddleware, async (req, res) => {
       });
     }
 
+    // If Stripe Identity check is pending, actively poll Stripe session status
+    if (stripe && user.stripe_identity_status === 'pending' && user.stripe_identity_session_id) {
+      try {
+        const session = await stripe.identity.verificationSessions.retrieve(user.stripe_identity_session_id);
+        if (session.status === 'verified') {
+          user.stripe_identity_status = 'pass';
+          user.stripe_identity_date = new Date();
+          user.email_verified = true;
+          user.phone_verified = true;
+          user.is_verified_buyer = true;
+          await user.save();
+          console.log(`[StripeIdentity] ✓ Auto-polled: User #${user.id} Stripe Identity verified!`);
+        } else if (session.status === 'requires_input') {
+          user.stripe_identity_status = 'fail';
+          await user.save();
+        }
+      } catch (pollErr) {
+        console.warn('[StripeIdentity] Status poll error:', pollErr.message);
+      }
+    }
+
     const isVerified = calculateVerifiedStatus(user);
 
     // Auto-sync is_verified_buyer if criteria met
