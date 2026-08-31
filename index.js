@@ -91,6 +91,7 @@ app.get("/health", (_req, res) => {
 const PORT = process.env.PORT || 5001;
 const HOST = process.env.HOST || "0.0.0.0";
 
+app.use('/api', router);
 app.use(router);
 
 connectDB();
