@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { Op } = require('sequelize');
-const { Properties, PropertyType, TenureType, Users } = require('../models');
+const { Properties, PropertyType, TenureType, Users, Offers } = require('../models');
 const { AgentMiddlware, PropertyOwnerMiddleware } = require('../middleware');
 const { buildPropertyQueryOptions } = require('../services/propertyFilterService');
 const { checkImageSafety, checkImagesBatchSafety } = require('../services/openaiModerationService');
@@ -52,6 +52,26 @@ router.get('/seller-properties', PropertyOwnerMiddleware, async (req, res) => {
                 success: false,
                 message: 'Only sellers can access this endpoint',
             });
+        }
+
+        // Auto-heal any legacy property whose offer was marked as completed_sold
+        try {
+            const soldOffers = await Offers.findAll({
+                where: {
+                    seller_id: req.user.id,
+                    status: 'completed_sold'
+                },
+                attributes: ['property_id']
+            });
+            if (soldOffers.length > 0) {
+                const soldPropIds = soldOffers.map(o => o.property_id).filter(Boolean);
+                await Properties.update(
+                    { status: 'sold' },
+                    { where: { id: { [Op.in]: soldPropIds }, status: { [Op.ne]: 'sold' } } }
+                );
+            }
+        } catch (healErr) {
+            console.warn('[property] Auto-heal sold properties warning:', healErr.message);
         }
 
         const property = await Properties.findAll({
@@ -201,6 +221,25 @@ router.post('/', PropertyOwnerMiddleware, uploadProperty, async (req, res) => {
 
         // Enforce 1-Active-Listing rule for Private Sellers
         if (req.user.role === 'seller') {
+            try {
+                const soldOffers = await Offers.findAll({
+                    where: {
+                        seller_id: ownerId,
+                        status: 'completed_sold'
+                    },
+                    attributes: ['property_id']
+                });
+                if (soldOffers.length > 0) {
+                    const soldPropIds = soldOffers.map(o => o.property_id).filter(Boolean);
+                    await Properties.update(
+                        { status: 'sold' },
+                        { where: { id: { [Op.in]: soldPropIds }, status: { [Op.ne]: 'sold' } } }
+                    );
+                }
+            } catch (healErr) {
+                console.warn('[property] Auto-heal sold properties warning in create:', healErr.message);
+            }
+
             const activeListing = await Properties.findOne({
                 where: {
                     agent_id: ownerId,
