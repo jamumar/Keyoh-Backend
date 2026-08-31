@@ -96,14 +96,9 @@ router.post('/purchase', ChatAuthMiddleware, async (req, res) => {
       let targetProp = null;
       if (propertyId) {
         targetProp = await Properties.findByPk(propertyId);
-      } else {
-        targetProp = await Properties.findOne({
-          where: { agent_id: userId },
-          order: [['createdAt', 'DESC']],
-        });
       }
 
-      if (targetProp) {
+      if (targetProp && targetProp.status !== 'sold') {
         targetProp.status = 'available';
         targetProp.verified = true;
         await targetProp.save();

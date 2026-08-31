@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { Op } = require('sequelize');
 const { Properties, PropertyType, TenureType, Users } = require('../models');
 const { AgentMiddlware, PropertyOwnerMiddleware } = require('../middleware');
 const { buildPropertyQueryOptions } = require('../services/propertyFilterService');
@@ -202,7 +203,7 @@ router.post('/', PropertyOwnerMiddleware, uploadProperty, async (req, res) => {
             const activeListing = await Properties.findOne({
                 where: {
                     agent_id: ownerId,
-                    status: ['available', 'under_offer']
+                    status: { [Op.in]: ['available', 'under_offer'] }
                 }
             });
 
