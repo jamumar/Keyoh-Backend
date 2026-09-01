@@ -5,6 +5,36 @@ const { ChatAuthMiddleware, PropertyOwnerMiddleware } = require('../middleware')
 const { lookupPostcode } = require('../services/addressService');
 const { sendPushToUser } = require('../services/pushNotificationService');
 
+// ---------------------------------------------------------------------------
+// Lightweight per-IP rate limiter for the postcode lookup endpoint
+// Max 5 requests per minute per IP — resets every 60 seconds
+// No extra npm packages needed.
+// ---------------------------------------------------------------------------
+const _postcodeLimitMap = new Map(); // ip -> { count, resetAt }
+const POSTCODE_RATE_LIMIT = 5;
+const POSTCODE_RATE_WINDOW_MS = 60 * 1000;
+
+function postcodeRateLimiter(req, res, next) {
+  const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+  const now = Date.now();
+  const entry = _postcodeLimitMap.get(ip);
+
+  if (!entry || now > entry.resetAt) {
+    _postcodeLimitMap.set(ip, { count: 1, resetAt: now + POSTCODE_RATE_WINDOW_MS });
+    return next();
+  }
+
+  if (entry.count >= POSTCODE_RATE_LIMIT) {
+    return res.status(429).json({
+      success: false,
+      message: 'Too many postcode lookups. Please wait a moment before trying again.',
+    });
+  }
+
+  entry.count += 1;
+  return next();
+}
+
 // Initialize Stripe SDK conditionally if STRIPE_SECRET_KEY is configured
 let stripe = null;
 if (process.env.STRIPE_SECRET_KEY) {
@@ -18,10 +48,11 @@ if (process.env.STRIPE_SECRET_KEY) {
 }
 
 // GET /verification/postcode-lookup — Royal Mail PAF & Ordnance Survey UK Address Verification
-router.get('/postcode-lookup', async (req, res) => {
+// Requires auth + rate limited to 5 req/min per IP to protect Ideal Postcodes API credits.
+router.get('/postcode-lookup', ChatAuthMiddleware, postcodeRateLimiter, async (req, res) => {
   try {
     const postcode = req.query.postcode || req.query.q;
-    if (!postcode) {
+    if (!postcode || String(postcode).trim().length < 2) {
       return res.status(400).json({
         success: false,
         message: 'postcode query parameter is required (e.g. /verification/postcode-lookup?postcode=SW1A1AA)',
@@ -29,12 +60,18 @@ router.get('/postcode-lookup', async (req, res) => {
     }
 
     const result = await lookupPostcode(postcode);
+
+    // Credit exhaustion — return 503 so client can show manual-entry fallback
+    if (result.creditsExhausted) {
+      return res.status(503).json(result);
+    }
+
     return res.status(200).json(result);
   } catch (error) {
     console.error('[VerificationController] Postcode lookup error:', error.message);
     return res.status(500).json({
       success: false,
-      message: error.message || 'Postcode address lookup failed.',
+      message: 'Postcode address lookup failed. Please enter your address manually.',
     });
   }
 });
@@ -300,6 +337,13 @@ router.post('/stripe-identity/webhook', async (req, res) => {
 // POST /verification/stripe-identity/simulate-result (For testing & webhook pass/fail)
 router.post('/stripe-identity/simulate-result', ChatAuthMiddleware, async (req, res) => {
   try {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(403).json({
+        success: false,
+        message: 'Simulation endpoint is disabled in production.',
+      });
+    }
+
     const { result } = req.body; // 'pass' | 'fail'
     if (!['pass', 'fail'].includes(result)) {
       return res.status(400).json({

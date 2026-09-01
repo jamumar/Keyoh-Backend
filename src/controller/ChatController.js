@@ -50,6 +50,16 @@ router.post('/send-message', ChatAuthMiddleware, async (req, res) => {
         const senderId = parseInt(req.user.id, 10);
         const { recipientId, propertyId, text, propertyAddress, propertyPrice } = req.body;
 
+        if (!text || typeof text !== 'string' || text.trim().length === 0) {
+            return res.status(400).json({ success: false, message: 'Message text cannot be empty.' });
+        }
+
+        if (text.length > 2000) {
+            return res.status(400).json({ success: false, message: 'Message cannot exceed 2,000 characters.' });
+        }
+
+        const sanitizedText = text.replace(/<[^>]*>?/gm, '').trim();
+
         // Look up property to find real seller (agent_id)
         let propertyOwnerId = null;
         if (propertyId) {
@@ -94,7 +104,7 @@ router.post('/send-message', ChatAuthMiddleware, async (req, res) => {
             });
         }
 
-        console.log(`💬  [CHAT DB]  From #${senderId} (${senderName}) → #${targetRecipientId} (${recipientName}): "${text}"`);
+        console.log(`💬  [CHAT DB]  From #${senderId} (${senderName}) → #${targetRecipientId} (${recipientName}): "${sanitizedText}"`);
 
         const timeStr = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
         const msgId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
@@ -110,14 +120,14 @@ router.post('/send-message', ChatAuthMiddleware, async (req, res) => {
                 seller_id: sellerId,
                 seller_name: sellerName,
                 last_sender_id: senderId,
-                last_message: text,
+                last_message: sanitizedText,
                 last_message_time: 'Just now',
                 unread: true,
                 read_by: [senderId],
             });
         } else {
             conv.last_sender_id = senderId;
-            conv.last_message = text;
+            conv.last_message = sanitizedText;
             conv.last_message_time = 'Just now';
             conv.unread = true;
             conv.read_by = [senderId];
@@ -129,17 +139,19 @@ router.post('/send-message', ChatAuthMiddleware, async (req, res) => {
             conversation_id: conv.id,
             sender_id: senderId,
             sender_name: senderName,
-            text,
+            text: sanitizedText,
             time: timeStr,
         });
 
         // Dispatch push notification to recipient
         sendChatPushNotification({
             recipientId: targetRecipientId,
-            senderName,
-            messageText: text,
+            senderName: senderName,
+            messageText: sanitizedText,
+            propertyAddress: conv.home_address,
             conversationId: conv.id,
-        }).catch((pErr) => console.error('[ChatController] Push notification dispatch error:', pErr.message));
+            propertyId: conv.home_id,
+        }).catch(err => console.error('[ChatController] Push dispatch error:', err.message));
 
         const updatedConv = await Conversations.findByPk(conv.id, {
             include: [{ model: Messages, as: 'messages' }],

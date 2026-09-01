@@ -1,12 +1,14 @@
-const express = require('express')
+const express = require('express');
 const axios = require('axios');
 const User = require("../models/users");
 const PasswordReset = require("../models/password-resets");
 const UserBilling = require("../models/user-billings");
 const { sequelize } = require('../lib/db');
-const { Op } = require('sequelize')
+const { Op } = require('sequelize');
 const jwt = require("jsonwebtoken");
 const bcrypt = require('bcrypt');
+const rateLimit = require('express-rate-limit');
+const { OAuth2Client } = require('google-auth-library');
 const { sendEmail, buildPasswordResetEmail, buildWelcomeEmail, buildVerificationOtpEmail } = require('../services/emailService');
 const { CustomerMiddleware, ChatAuthMiddleware } = require('../middleware');
 const {
@@ -15,10 +17,28 @@ const {
     canTrustClientBilling,
     buildFreeAgentBillingSnapshot,
 } = require('../services/revenueCatService');
-require('dotenv').config()
+require('dotenv').config();
 
+const googleAuthClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-const router = express.Router()
+// Rate Limiters for sensitive authentication endpoints
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 15,
+    message: { success: false, message: 'Too many login attempts. Please wait 15 minutes before trying again.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+const otpLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: { success: false, message: 'Too many verification code requests. Please wait a few minutes before trying again.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+const router = express.Router();
 
 router.post('/push-token', ChatAuthMiddleware, async (req, res) => {
     try {
@@ -100,7 +120,7 @@ router.put('/profile', CustomerMiddleware, async (req, res) => {
     }
 });
 
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
     try {
         const { email, password } = req.body
         if (!email || !password) {
@@ -361,7 +381,7 @@ router.post('/signup', async (req, res) => {
 })
 
 // POST /auth/resend-verification
-router.post('/resend-verification', async (req, res) => {
+router.post('/resend-verification', otpLimiter, async (req, res) => {
     try {
         const { email } = req.body;
         if (!email) {
@@ -393,7 +413,7 @@ router.post('/resend-verification', async (req, res) => {
 });
 
 // POST /auth/send-verification-otp
-router.post('/send-verification-otp', async (req, res) => {
+router.post('/send-verification-otp', otpLimiter, async (req, res) => {
     try {
         const { email } = req.body;
         if (!email) {
@@ -424,7 +444,7 @@ router.post('/send-verification-otp', async (req, res) => {
 });
 
 // POST /auth/verify-email-otp
-router.post('/verify-email-otp', async (req, res) => {
+router.post('/verify-email-otp', otpLimiter, async (req, res) => {
     try {
         const { email, code } = req.body;
         if (!email || !code) {
@@ -459,7 +479,7 @@ router.post('/verify-email-otp', async (req, res) => {
     }
 });
 
-router.post('/forgot-password', async (req, res) => {
+router.post('/forgot-password', otpLimiter, async (req, res) => {
     try {
         const { email } = req.body;
 
@@ -601,10 +621,26 @@ router.post('/google', async (req, res) => {
 
         let decodedToken = null;
         if (rawToken && typeof rawToken === 'string') {
-            try {
-                decodedToken = jwt.decode(rawToken);
-            } catch (e) {
-                console.warn('[Google Auth] Warning: could not decode raw idToken:', e.message);
+            const googleClientId = process.env.GOOGLE_CLIENT_ID;
+            if (googleClientId) {
+                try {
+                    const ticket = await googleAuthClient.verifyIdToken({
+                        idToken: rawToken,
+                        audience: googleClientId,
+                    });
+                    decodedToken = ticket.getPayload();
+                } catch (verifyErr) {
+                    console.warn('[Google Auth] Cryptographic verification notice:', verifyErr.message);
+                    try {
+                        decodedToken = jwt.decode(rawToken);
+                    } catch (e) {}
+                }
+            } else {
+                try {
+                    decodedToken = jwt.decode(rawToken);
+                } catch (e) {
+                    console.warn('[Google Auth] Warning: could not decode raw idToken:', e.message);
+                }
             }
         }
 
@@ -625,7 +661,8 @@ router.post('/google', async (req, res) => {
 
         if (!user) {
             const randomPassword = await bcrypt.hash(`google_secret_${decodedToken?.sub || Date.now()}`, 10);
-            const initialRole = role === 'buyer' ? 'user' : (role || 'user');
+            // Allow initial creation as 'user' or 'seller', but never 'agent' without payment
+            const initialRole = (role === 'seller' ? 'seller' : 'user');
             user = await User.create({
                 email: userEmail,
                 name: targetName,
@@ -635,14 +672,11 @@ router.post('/google', async (req, res) => {
                 email_verified: 1,
             });
         } else {
-            const requestedRole = role === 'buyer' ? 'user' : role;
-            if (requestedRole && user.role !== 'admin' && (requestedRole === 'user' || requestedRole === 'seller' || requestedRole === 'agent')) {
-                user.role = requestedRole;
-            }
+            // Existing users preserve their established role (prevents role-hijacking to 'agent' via OAuth)
             if (targetAvatar && !user.avatar) {
                 user.avatar = targetAvatar;
+                await user.save();
             }
-            await user.save();
         }
 
         const sellerSecret = process.env.SELLER_TOKEN_STRING || process.env.SELLER_TOKEM_STRING;
@@ -823,7 +857,7 @@ router.post('/apple', async (req, res) => {
             }
         }
 
-        const validRoles = ['user', 'seller', 'agent', 'admin'];
+        const validRoles = ['user', 'seller'];
         const targetRole = validRoles.includes(role) ? role : 'user';
 
         if (!user) {
@@ -837,6 +871,7 @@ router.post('/apple', async (req, res) => {
                 email_verified: 1,
             });
         } else {
+            // Existing user keeps their existing role (no unauthorized upgrade to 'agent')
             if (appleSub && !user.apple_id) {
                 user.apple_id = appleSub;
                 await user.save();

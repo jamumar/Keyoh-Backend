@@ -6,12 +6,15 @@ const { AgentMiddlware, PropertyOwnerMiddleware } = require('../middleware');
 const { buildPropertyQueryOptions } = require('../services/propertyFilterService');
 const { checkImageSafety, checkImagesBatchSafety } = require('../services/openaiModerationService');
 
-// Get all properties
+// Get all properties with pagination & performance optimizations
 router.get('/', async (req, res) => {
     try {
-        const { where, order, limit } = buildPropertyQueryOptions(req.query);
+        const { where, order } = buildPropertyQueryOptions(req.query);
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const pageSize = req.query.limit ? parseInt(req.query.limit, 10) : 30;
+        const offset = (page - 1) * pageSize;
 
-        const properties = await Properties.findAll({
+        const { count, rows: properties } = await Properties.findAndCountAll({
             where,
             include: [
                 {
@@ -31,16 +34,22 @@ router.get('/', async (req, res) => {
                 }
             ],
             order,
-            ...(limit ? { limit } : {}),
+            limit: pageSize,
+            offset,
         });
+
         res.status(200).json({
             success: true,
+            total: count,
+            page,
+            pageSize,
             data: properties
         });
     } catch (error) {
+        console.error('[property:get] error:', error.message);
         res.status(500).json({
             success: false,
-            message: error.message
+            message: 'Failed to load property listings.'
         });
     }
 });

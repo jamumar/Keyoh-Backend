@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { Properties, Users, UserBillings } = require('../models');
+const { Op } = require('sequelize');
 const { ChatAuthMiddleware } = require('../middleware');
 const { sendBoostActivePushNotification } = require('../services/pushNotificationService');
 
@@ -77,7 +78,7 @@ function getProductInfo(productId) {
   return PRODUCT_CATALOG['keyoh_property_boost_monthly'];
 }
 
-// 1. Process User Purchase (Dev Mock or Mobile App In-App Purchase Sync)
+// 1. Process User Purchase (Mobile App In-App Purchase Sync)
 router.post('/purchase', ChatAuthMiddleware, async (req, res) => {
   try {
     const userId = parseInt(req.user.id, 10);
@@ -89,15 +90,48 @@ router.post('/purchase', ChatAuthMiddleware, async (req, res) => {
       return res.status(404).json({ success: false, message: 'User profile not found' });
     }
 
+    // Ownership validation for property-tied purchases (Listing fee & Boosts)
+    let targetProp = null;
+    if (propertyId) {
+      targetProp = await Properties.findByPk(propertyId);
+      if (targetProp && targetProp.agent_id !== userId && user.role !== 'admin') {
+        return res.status(403).json({
+          success: false,
+          message: 'Not authorized: You can only purchase listings or boosts for your own properties.',
+        });
+      }
+    }
+
+    // Deduplication check: Prevent duplicate billing records within a 3-minute window
+    const recentBilling = await UserBillings.findOne({
+      where: {
+        user_id: userId,
+        product_id: productId || 'keyoh_property_boost_monthly',
+        status: 'active',
+        createdAt: {
+          [Op.gt]: new Date(Date.now() - 3 * 60 * 1000),
+        },
+      },
+      order: [['createdAt', 'DESC']],
+    });
+
+    if (recentBilling && info.type === 'listing_fee') {
+      console.log(`[Billing] Deduplication hit for User #${userId} on product ${productId}`);
+      return res.status(200).json({
+        success: true,
+        message: `Active purchase already recorded for ${info.name}`,
+        data: {
+          product: info,
+          billing: recentBilling,
+          property: targetProp,
+        },
+      });
+    }
+
     let updatedProperty = null;
     let expireDate = null;
 
     if (info.type === 'listing_fee') {
-      let targetProp = null;
-      if (propertyId) {
-        targetProp = await Properties.findByPk(propertyId);
-      }
-
       if (targetProp && targetProp.status !== 'sold') {
         targetProp.status = 'available';
         targetProp.verified = true;
@@ -105,10 +139,7 @@ router.post('/purchase', ChatAuthMiddleware, async (req, res) => {
         updatedProperty = targetProp;
       }
     } else if (info.type === 'boost') {
-      let targetProp = null;
-      if (propertyId) {
-        targetProp = await Properties.findByPk(propertyId);
-      } else {
+      if (!targetProp) {
         targetProp = await Properties.findOne({
           where: { agent_id: userId },
           order: [['createdAt', 'DESC']],
@@ -163,7 +194,7 @@ router.post('/purchase', ChatAuthMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error('[billing:error]', error.message);
-    return res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: 'Billing transaction processing error.' });
   }
 });
 
@@ -172,8 +203,14 @@ router.post('/revenuecat', async (req, res) => {
   try {
     const authHeader = req.headers['authorization'];
     const webhookSecret = process.env.REVENUECAT_WEBHOOK_SECRET;
-    if (webhookSecret && authHeader !== `Bearer ${webhookSecret}`) {
-      return res.status(401).json({ success: false, message: 'Invalid RevenueCat webhook signature' });
+    
+    // In production, require configured webhook secret. In dev/sandbox, validate when provided.
+    if (webhookSecret) {
+      if (authHeader !== `Bearer ${webhookSecret}`) {
+        return res.status(401).json({ success: false, message: 'Invalid RevenueCat webhook signature' });
+      }
+    } else if (process.env.NODE_ENV === 'production') {
+      return res.status(401).json({ success: false, message: 'Webhook secret is not configured' });
     }
 
     const event = req.body?.event || req.body;

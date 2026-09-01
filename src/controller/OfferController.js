@@ -301,6 +301,14 @@ router.post('/:id/accept', ChatAuthMiddleware, async (req, res) => {
             return res.status(403).json({ success: false, message: 'Only the listing owner or managing agent can accept this offer' });
         }
 
+        // State machine guard: Only pending or countered offers can be accepted
+        if (offer.status !== 'pending' && offer.status !== 'countered') {
+            return res.status(400).json({
+                success: false,
+                message: `Offer cannot be accepted because it is currently "${offer.status}".`,
+            });
+        }
+
         offer.status = 'accepted';
         offer.accepted_at = new Date();
         if (req.body?.message) {
@@ -367,6 +375,14 @@ router.post('/:id/reject', ChatAuthMiddleware, async (req, res) => {
             return res.status(403).json({ success: false, message: 'Only the listing owner or managing agent can reject this offer' });
         }
 
+        // State machine guard: Completed sales cannot be rejected
+        if (offer.status === 'completed_sold') {
+            return res.status(400).json({
+                success: false,
+                message: 'A completed sale cannot be rejected.',
+            });
+        }
+
         offer.status = 'rejected';
         if (req.body?.message) {
             offer.response_message = req.body.message.trim();
@@ -428,6 +444,14 @@ router.post('/:id/counter', ChatAuthMiddleware, async (req, res) => {
             return res.status(403).json({ success: false, message: 'Only the listing owner or managing agent can counter this offer' });
         }
 
+        // State machine guard: Only active (pending/countered) offers can be countered
+        if (offer.status !== 'pending' && offer.status !== 'countered') {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot counter an offer that is currently "${offer.status}".`,
+            });
+        }
+
         offer.counter_amount = numericCounter;
         offer.status = 'countered';
         if (message) {
@@ -483,6 +507,14 @@ router.post('/:id/complete', ChatAuthMiddleware, async (req, res) => {
         const isAuthorized = parseInt(offer.seller_id, 10) === userId || (offer.property && parseInt(offer.property.agent_id, 10) === userId);
         if (!isAuthorized) {
             return res.status(403).json({ success: false, message: 'Only the listing owner or managing agent can complete this sale' });
+        }
+
+        // State machine guard: Only accepted offers can be completed
+        if (offer.status !== 'accepted') {
+            return res.status(400).json({
+                success: false,
+                message: 'Only an accepted offer can be completed and marked as sold.',
+            });
         }
 
         offer.status = 'completed_sold';
