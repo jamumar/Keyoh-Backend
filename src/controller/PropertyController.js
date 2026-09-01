@@ -470,7 +470,6 @@ router.post('/', PropertyOwnerMiddleware, uploadProperty, async (req, res) => {
         res.status(201).json({
             success: true,
             data: newProperty,
-            imageErrors: imageErrors.length > 0 ? imageErrors : undefined,
             videoErrors: videoErrors.length > 0 ? videoErrors : undefined,
         });
     } catch (error) {
