@@ -40,6 +40,9 @@ const otpLimiter = rateLimit({
 
 const router = express.Router();
 
+// Agent free trial spots limit (3 for testing, 100 for production)
+const AGENT_FREE_TRIAL_LIMIT = parseInt(process.env.AGENT_FREE_TRIAL_LIMIT, 10) || 3;
+
 router.post('/push-token', ChatAuthMiddleware, async (req, res) => {
     try {
         const userId = req.user.id;
@@ -276,16 +279,19 @@ router.post('/check-agent-eligibility', async (req, res) => {
             });
         }
 
-        // 2. Check total agent count (isFree hardcoded true for testing — use agentCount < 100 later)
+        // 2. Check total agent count against trial limit
         const agentCount = await User.count({
             where: { role: 'agent' }
         });
 
+        const isFree = agentCount < AGENT_FREE_TRIAL_LIMIT;
+
         return res.status(200).json({
             success: true,
-            isFree: agentCount < 100,
-            // isFree: false,
+            isFree,
             agentCount,
+            trialLimit: AGENT_FREE_TRIAL_LIMIT,
+            spotsRemaining: Math.max(0, AGENT_FREE_TRIAL_LIMIT - agentCount),
         });
     } catch (err) {
         return res.status(500).json({
@@ -345,9 +351,9 @@ router.post('/signup', async (req, res) => {
             } else {
                 // Agent signup default
                 const agentCount = await User.count({ where: { role: 'agent' } });
-                if (agentCount >= 100) {
+                if (agentCount >= AGENT_FREE_TRIAL_LIMIT) {
                     return res.status(402).json({
-                        message: 'Free agent signup is no longer available. Please subscribe to continue.',
+                        message: `The first ${AGENT_FREE_TRIAL_LIMIT} free agent trial spots have been claimed. Please complete standard subscription checkout.`,
                         success: false,
                     });
                 }
