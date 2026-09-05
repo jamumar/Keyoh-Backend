@@ -222,6 +222,11 @@ router.post('/login', loginLimiter, async (req, res) => {
                 success: false,
             });
         }
+        if (req.body.role === 'seller' && user.role === 'user') {
+            user.role = 'seller';
+            await user.save();
+        }
+
         const sellerSecret = process.env.SELLER_TOKEN_STRING || process.env.SELLER_TOKEM_STRING;
         const token_string = user.role == 'admin' ? process.env.ADMIN_TOKEN_STRING : user.role == 'seller' ? sellerSecret : user.role == 'agent' ? process.env.AGENT_TOKEN_STRING : process.env.USER_TOKEN_STRING;
 
@@ -737,7 +742,11 @@ router.post('/google', async (req, res) => {
                 email_verified: 1,
             });
         } else {
-            // Existing users preserve their established role (prevents role-hijacking to 'agent' via OAuth)
+            // Existing users can upgrade from 'user' to 'seller', but cannot hijack 'agent' role
+            if (role === 'seller' && user.role === 'user') {
+                user.role = 'seller';
+                await user.save();
+            }
             if (targetAvatar && !user.avatar) {
                 user.avatar = targetAvatar;
                 await user.save();
@@ -936,7 +945,11 @@ router.post('/apple', async (req, res) => {
                 email_verified: 1,
             });
         } else {
-            // Existing user keeps their existing role (no unauthorized upgrade to 'agent')
+            // Existing user can upgrade from 'user' to 'seller', but cannot hijack 'agent' role
+            if (targetRole === 'seller' && user.role === 'user') {
+                user.role = 'seller';
+                await user.save();
+            }
             if (appleSub && !user.apple_id) {
                 user.apple_id = appleSub;
                 await user.save();
