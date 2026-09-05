@@ -18,6 +18,15 @@ module.exports = {
     }, {
       name: 'Bungalow',
       status: 'active'
+    }, {
+      name: 'Other',
+      status: 'active'
+    }, {
+      name: 'End of terrace',
+      status: 'active'
+    }, {
+      name: 'Maisonette',
+      status: 'active'
     }])
   },
 
