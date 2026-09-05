@@ -83,12 +83,12 @@ router.get('/top3', ChatAuthMiddleware, async (req, res) => {
     }
 
     const preferredBeds = parseInt(user.preferred_beds || '2', 10) || 2;
-    const preferredLocation = (user.location || '').trim();
+    const preferredLocation = (user.location || '').trim().toLowerCase();
+    const maxPrice = parseFloat(user.max_price) || 0;
 
-    // 48-hour rotation epoch key
-    const ROTATION_PERIOD_MS = 48 * 60 * 60 * 1000;
+    // 36-hour server-side rotation epoch key
+    const ROTATION_PERIOD_MS = 36 * 60 * 60 * 1000;
     const currentEpoch = Math.floor(Date.now() / ROTATION_PERIOD_MS);
-    const rotationSeed = (req.user.id + currentEpoch) % 100;
 
     // Fetch property IDs user has already swiped on
     const { UserSwipes } = require('../models');
@@ -112,7 +112,7 @@ router.get('/top3', ChatAuthMiddleware, async (req, res) => {
       whereCondition.id = { [Op.notIn]: swipedPropertyIds };
     }
 
-    // Fetch active available properties
+    // Fetch active available properties from database
     const activeProperties = await Properties.findAll({
       where: whereCondition,
       include: [
@@ -121,40 +121,82 @@ router.get('/top3', ChatAuthMiddleware, async (req, res) => {
         { model: Users, as: 'agentProperties', attributes: ['id', 'name', 'email', 'phone', 'agency_name'] },
       ],
       order: [['createdAt', 'DESC']],
-      limit: 20,
+      limit: 50,
     });
 
-    // Score properties
-    const scoredProperties = activeProperties.map((prop) => {
-      const metrics = calculateMatchMetrics(prop, user);
+    const strictMatches = [];
+    const nearestMatches = [];
+
+    for (const prop of activeProperties) {
+      const propBeds = parseInt(prop.beds || '0', 10);
+      const propPrice = parseFloat(prop.price) || 0;
+      const propAddress = (prop.address || '').toLowerCase();
+      const propPostcode = (prop.post_code || '').toLowerCase();
+
+      // STRICT LIMIT 1: Never fewer bedrooms than the buyer requested
+      if (propBeds < preferredBeds) {
+        continue;
+      }
+
+      const isLocMatch = !preferredLocation || propAddress.includes(preferredLocation) || propPostcode.includes(preferredLocation);
+      const isPriceMatch = maxPrice <= 0 || propPrice <= maxPrice;
+      const isPriceNearMatch = maxPrice <= 0 || propPrice <= maxPrice * 1.10; // Up to 10% above budget
+
       const rawProp = prop.toJSON();
-      const numPrice = parseFloat(rawProp.price) || 0;
-      
-      return {
+      const metrics = calculateMatchMetrics(prop, user);
+
+      const formattedItem = {
         ...rawProp,
         id: String(rawProp.id),
-        formattedPrice: `£${numPrice.toLocaleString()}`,
+        formattedPrice: `£${propPrice.toLocaleString()}`,
         compatibility: metrics.compatibility,
         signals: metrics.signals,
         monthlyPayment: metrics.monthlyPayment,
         sellerName: rawProp.agentProperties?.name || 'Seller',
         verified: true,
       };
-    });
 
-    // Sort by compatibility score
-    scoredProperties.sort((a, b) => b.compatibility - a.compatibility);
+      if (isLocMatch && isPriceMatch) {
+        // Strict Match
+        strictMatches.push({
+          ...formattedItem,
+          isNearestMatch: false,
+        });
+      } else if (isPriceNearMatch) {
+        // Nearest Match (Location widened first, price widened up to +10% max)
+        nearestMatches.push({
+          ...formattedItem,
+          isNearestMatch: true,
+          signals: [
+            ...metrics.signals.filter(s => !s.toLowerCase().includes('budget')),
+            propPrice > maxPrice && maxPrice > 0 ? 'Nearest match (within 10% of budget)' : 'Nearest match in extended area',
+          ],
+        });
+      }
+    }
 
-    // Pick top matches
-    const selectedHomes = scoredProperties.slice(0, 5);
+    // Sort both groups by compatibility score descending
+    strictMatches.sort((a, b) => b.compatibility - a.compatibility);
+    nearestMatches.sort((a, b) => b.compatibility - a.compatibility);
+
+    // Combine strict matches with nearest matches up to exactly 3 homes
+    const selectedHomes = [...strictMatches];
+    if (selectedHomes.length < 3) {
+      const needed = 3 - selectedHomes.length;
+      selectedHomes.push(...nearestMatches.slice(0, needed));
+    }
+
+    // Strictly enforce maximum 3 homes
+    const finalDeck = selectedHomes.slice(0, 3);
 
     const nextRefreshAt = new Date((currentEpoch + 1) * ROTATION_PERIOD_MS).toISOString();
 
     return res.status(200).json({
       success: true,
       data: {
-        matches: selectedHomes,
-        count: selectedHomes.length,
+        matches: finalDeck,
+        count: finalDeck.length,
+        isShortDeck: finalDeck.length < 3,
         userPreferences: {
           location: user.location || 'All areas',
           preferred_beds: user.preferred_beds || 2,
@@ -163,7 +205,7 @@ router.get('/top3', ChatAuthMiddleware, async (req, res) => {
           max_price: user.max_price,
         },
         nextRefreshAt,
-        rotationPeriodHours: 48,
+        rotationPeriodHours: 36,
       },
     });
   } catch (error) {
