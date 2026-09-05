@@ -260,23 +260,32 @@ router.post('/login', loginLimiter, async (req, res) => {
 
 router.post('/check-agent-eligibility', async (req, res) => {
     try {
-        const { email, phone } = req.body;
-        console.log('email', email)
-        // Check email/phone are not already registered
-        const existingUser = await User.findOne({
-            where: {
-                [Op.or]: [
-                    { email: email },
-                    phone ? { phone: phone } : null
-                ].filter(Boolean)
-            }
-        });
+        const { email, phone } = req.body || {};
+        
+        // 1. Check email/phone are not already registered IF provided
+        const orConditions = [];
+        if (email && typeof email === 'string' && email.trim().length > 0) {
+            orConditions.push({ email: email.trim().toLowerCase() });
+        }
+        if (phone && typeof phone === 'string' && phone.trim().length > 0) {
+            orConditions.push({ phone: phone.trim() });
+        }
 
-        if (existingUser) {
-            return res.status(400).json({
-                message: existingUser.email === email ? 'Email already in use' : 'Phone already in use',
-                success: false,
+        if (orConditions.length > 0) {
+            const existingUser = await User.findOne({
+                where: {
+                    [Op.or]: orConditions
+                }
             });
+
+            if (existingUser) {
+                return res.status(400).json({
+                    message: existingUser.email?.toLowerCase() === email?.trim()?.toLowerCase()
+                        ? 'Email already in use'
+                        : 'Phone already in use',
+                    success: false,
+                });
+            }
         }
 
         // 2. Check total agent count against trial limit
@@ -294,6 +303,7 @@ router.post('/check-agent-eligibility', async (req, res) => {
             spotsRemaining: Math.max(0, AGENT_FREE_TRIAL_LIMIT - agentCount),
         });
     } catch (err) {
+        console.error('[Auth] Error checking agent eligibility:', err);
         return res.status(500).json({
             message: 'Something went wrong checking eligibility',
             success: false,
