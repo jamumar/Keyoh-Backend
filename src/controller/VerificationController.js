@@ -76,12 +76,23 @@ router.get('/postcode-lookup', ChatAuthMiddleware, postcodeRateLimiter, async (r
   }
 });
 
-// Helper to check if buyer meets all 3 criteria for Verified Buyer Badge
+// Helper to check if buyer meets criteria for Verified Buyer Badge
+// (Email Confirmed + Stripe Identity Pass + Stated Purchasing Position)
 const calculateVerifiedStatus = (user) => {
   return Boolean(
     user.email_verified &&
-    user.phone_verified &&
-    user.stripe_identity_status === 'pass'
+    user.stripe_identity_status === 'pass' &&
+    user.buyer_position &&
+    String(user.buyer_position).trim().length > 0
+  );
+};
+
+// Helper to check if seller meets criteria for Verified Seller Badge
+// (Stripe Identity Pass + Property Ownership / Right to Sell Declaration)
+const calculateSellerVerifiedStatus = (user) => {
+  return Boolean(
+    user.stripe_identity_status === 'pass' &&
+    user.seller_ownership_declaration === true
   );
 };
 
@@ -93,9 +104,7 @@ router.get('/buyer/status', ChatAuthMiddleware, async (req, res) => {
       attributes: [
         'id',
         'email',
-        'phone',
         'email_verified',
-        'phone_verified',
         'stripe_identity_status',
         'stripe_identity_session_id',
         'stripe_identity_date',
@@ -121,8 +130,7 @@ router.get('/buyer/status', ChatAuthMiddleware, async (req, res) => {
           user.stripe_identity_status = 'pass';
           user.stripe_identity_date = new Date();
           user.email_verified = true;
-          user.phone_verified = true;
-          user.is_verified_buyer = true;
+          user.is_verified_buyer = Boolean(user.buyer_position);
           await user.save();
           console.log(`[StripeIdentity] 🎉 User #${user.id} (${user.email}) Stripe Identity status set to PASS!`);
 
@@ -136,7 +144,6 @@ router.get('/buyer/status', ChatAuthMiddleware, async (req, res) => {
           user.stripe_identity_status = 'fail';
           await user.save();
         } else {
-          // 'processing' and 'requires_input' remain 'pending'
           if (user.stripe_identity_status !== 'pending') {
             user.stripe_identity_status = 'pending';
             await user.save();
@@ -159,11 +166,74 @@ router.get('/buyer/status', ChatAuthMiddleware, async (req, res) => {
       success: true,
       data: {
         email_verified: Boolean(user.email_verified),
-        phone_verified: Boolean(user.phone_verified),
         stripe_identity_status: user.stripe_identity_status,
         stripe_identity_date: user.stripe_identity_date,
         buyer_position: user.buyer_position,
         is_verified_buyer: isVerified,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// GET /verification/seller/status
+router.get('/seller/status', ChatAuthMiddleware, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  try {
+    const user = await Users.findByPk(req.user.id, {
+      attributes: [
+        'id',
+        'email',
+        'stripe_identity_status',
+        'stripe_identity_session_id',
+        'stripe_identity_date',
+        'seller_ownership_declaration',
+        'seller_ownership_declaration_date',
+        'is_verified_seller',
+      ],
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Seller account not found',
+      });
+    }
+
+    if (stripe && user.stripe_identity_status !== 'pass' && user.stripe_identity_session_id) {
+      try {
+        const session = await stripe.identity.verificationSessions.retrieve(user.stripe_identity_session_id);
+        if (session.status === 'verified') {
+          user.stripe_identity_status = 'pass';
+          user.stripe_identity_date = new Date();
+          await user.save();
+        } else if (session.status === 'canceled') {
+          user.stripe_identity_status = 'fail';
+          await user.save();
+        }
+      } catch (pollErr) {
+        console.warn('[StripeIdentity] Seller status poll error:', pollErr.message);
+      }
+    }
+
+    const isVerifiedSeller = calculateSellerVerifiedStatus(user);
+    if (user.is_verified_seller !== isVerifiedSeller) {
+      user.is_verified_seller = isVerifiedSeller;
+      await user.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        stripe_identity_status: user.stripe_identity_status,
+        stripe_identity_date: user.stripe_identity_date,
+        seller_ownership_declaration: Boolean(user.seller_ownership_declaration),
+        seller_ownership_declaration_date: user.seller_ownership_declaration_date,
+        is_verified_seller: isVerifiedSeller,
       },
     });
   } catch (error) {
