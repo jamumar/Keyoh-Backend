@@ -48,8 +48,8 @@ if (process.env.STRIPE_SECRET_KEY) {
 }
 
 // GET /verification/postcode-lookup — Royal Mail PAF & Ordnance Survey UK Address Verification
-// Requires auth + rate limited to 5 req/min per IP to protect Ideal Postcodes API credits.
-router.get('/postcode-lookup', ChatAuthMiddleware, postcodeRateLimiter, async (req, res) => {
+// Rate limited per IP to protect Ideal Postcodes API credits while allowing guest listing builders
+router.get('/postcode-lookup', postcodeRateLimiter, async (req, res) => {
   try {
     const postcode = req.query.postcode || req.query.q;
     if (!postcode || String(postcode).trim().length < 2) {

@@ -3,6 +3,10 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const app = express();
+
+// Trust reverse proxy (Nginx) for accurate client IP identification and rate limiting
+app.set("trust proxy", 1);
+
 const bodyParser = require("body-parser");
 const path = require("path");
 const { connectDB } = require("./src/lib/db");
