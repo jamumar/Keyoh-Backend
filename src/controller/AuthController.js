@@ -96,7 +96,7 @@ router.post('/push-token', ChatAuthMiddleware, async (req, res) => {
 router.put('/profile', CustomerMiddleware, async (req, res) => {
     try {
         const userId = req.user.id;
-        const { name, avatar, location } = req.body;
+        const { name, avatar, location, role } = req.body;
         const user = await User.findByPk(userId);
         if (!user) {
             return res.status(404).json({ success: false, message: 'User not found' });
@@ -104,6 +104,9 @@ router.put('/profile', CustomerMiddleware, async (req, res) => {
         if (name && typeof name === 'string') user.name = name.trim();
         if (avatar !== undefined) user.avatar = avatar;
         if (location !== undefined) user.location = location;
+        if (role && ['user', 'seller', 'buyer'].includes(role)) {
+            user.role = role === 'buyer' ? 'user' : role;
+        }
         await user.save();
 
         const safeUser = user.toJSON();
@@ -116,6 +119,68 @@ router.put('/profile', CustomerMiddleware, async (req, res) => {
         });
     } catch (error) {
         console.error('[Auth] ❌ profile update error:', error.message);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// POST /auth/switch-role — Instantly switch between Buyer ('user') and Seller Mode
+router.post('/switch-role', CustomerMiddleware, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { role } = req.body;
+
+        const targetRole = role === 'buyer' ? 'user' : role;
+        if (!targetRole || !['user', 'seller', 'agent'].includes(targetRole)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid target role. Supported roles: user (buyer), seller.',
+            });
+        }
+
+        const user = await User.findByPk(userId);
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        if (targetRole === 'agent' && user.role !== 'agent' && !user.is_verified_agent) {
+            return res.status(403).json({
+                success: false,
+                message: 'Agent membership required to switch to agent role.',
+            });
+        }
+
+        user.role = targetRole;
+        await user.save();
+
+        const sellerSecret = process.env.SELLER_TOKEN_STRING || process.env.SELLER_TOKEM_STRING;
+        const token_string = user.role === 'admin'
+            ? process.env.ADMIN_TOKEN_STRING
+            : user.role === 'seller'
+            ? sellerSecret
+            : user.role === 'agent'
+            ? process.env.AGENT_TOKEN_STRING
+            : process.env.USER_TOKEN_STRING;
+
+        const sessiontoken = jwt.sign({
+            id: user.id,
+            role: user.role,
+            email: user.email,
+        }, token_string, { expiresIn: '2d' });
+
+        const safeUser = user.toJSON();
+        delete safeUser.password;
+
+        return res.status(200).json({
+            success: true,
+            message: `Switched to ${targetRole === 'user' ? 'Buyer' : targetRole.charAt(0).toUpperCase() + targetRole.slice(1)} Mode`,
+            data: {
+                user: safeUser,
+                data: safeUser,
+                token: sessiontoken,
+            },
+        });
+    } catch (error) {
+        console.error('[Auth] ❌ switch role error:', error.message);
         return res.status(500).json({ success: false, message: error.message });
     }
 });
