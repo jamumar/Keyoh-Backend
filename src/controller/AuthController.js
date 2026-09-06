@@ -333,7 +333,7 @@ router.post('/signup', async (req, res) => {
         let billingSnapshot = null;
 
         if (role === 'agent') {
-            if (revenueCatAppUserId) {
+            if (!isFree && revenueCatAppUserId) {
                 try {
                     const verification = await verifyActiveSubscriptionWithRetry(revenueCatAppUserId);
                     if (verification.isActive && verification.billing) {
