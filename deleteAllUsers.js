@@ -12,12 +12,13 @@ const {
   UserBillings,
   Messages,
   Conversations,
-  PasswordResets,
+  PasswordReset,
   PropertyHandovers,
   PartnerReferralLeads,
   PartnerClickLogs,
   AgentStats,
   VideographerRequests,
+  TrialDeviceClaims,
 } = require('./src/models');
 
 async function deleteAllUsers() {
@@ -35,9 +36,10 @@ async function deleteAllUsers() {
     if (Reports) await Reports.destroy({ where: {}, truncate: true, cascade: true }).catch(() => Reports.destroy({ where: {} }));
     if (UserBlocks) await UserBlocks.destroy({ where: {}, truncate: true, cascade: true }).catch(() => UserBlocks.destroy({ where: {} }));
     if (UserBillings) await UserBillings.destroy({ where: {}, truncate: true, cascade: true }).catch(() => UserBillings.destroy({ where: {} }));
+    if (TrialDeviceClaims) await TrialDeviceClaims.destroy({ where: {}, truncate: true, cascade: true }).catch(() => TrialDeviceClaims.destroy({ where: {} }));
     if (Messages) await Messages.destroy({ where: {}, truncate: true, cascade: true }).catch(() => Messages.destroy({ where: {} }));
     if (Conversations) await Conversations.destroy({ where: {}, truncate: true, cascade: true }).catch(() => Conversations.destroy({ where: {} }));
-    if (PasswordResets) await PasswordResets.destroy({ where: {}, truncate: true, cascade: true }).catch(() => PasswordResets.destroy({ where: {} }));
+    if (PasswordReset) await PasswordReset.destroy({ where: {}, truncate: true, cascade: true }).catch(() => PasswordReset.destroy({ where: {} }));
     if (PropertyHandovers) await PropertyHandovers.destroy({ where: {}, truncate: true, cascade: true }).catch(() => PropertyHandovers.destroy({ where: {} }));
     if (PartnerReferralLeads) await PartnerReferralLeads.destroy({ where: {}, truncate: true, cascade: true }).catch(() => PartnerReferralLeads.destroy({ where: {} }));
     if (PartnerClickLogs) await PartnerClickLogs.destroy({ where: {}, truncate: true, cascade: true }).catch(() => PartnerClickLogs.destroy({ where: {} }));
