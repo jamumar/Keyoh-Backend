@@ -18,6 +18,7 @@ const Messages = require('./messages');
 const Offers = require('./offers');
 const VideographerRequests = require('./videographer-requests');
 const UserSwipes = require('./user-swipes');
+const TrialDeviceClaims = require('./trial-device-claims');
 
 const models = {
     Properties,
@@ -40,6 +41,7 @@ const models = {
     Offers,
     VideographerRequests,
     UserSwipes,
+    TrialDeviceClaims,
 };
 
 // Run associations

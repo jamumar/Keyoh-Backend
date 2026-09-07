@@ -113,6 +113,10 @@ const Users = sequelize.define("users", {
         type: DataTypes.STRING(255),
         allowNull: true,
     },
+    device_hash: {
+        type: DataTypes.STRING(128),
+        allowNull: true,
+    },
 });
 
 Users.associate = function (models) {
@@ -136,6 +140,12 @@ Users.associate = function (models) {
         foreignKey: 'user_id',
         as: 'billings',
     });
+    if (models.TrialDeviceClaims) {
+        Users.hasMany(models.TrialDeviceClaims, {
+            foreignKey: 'user_id',
+            as: 'trialClaims',
+        });
+    }
 };
 
 module.exports = Users;

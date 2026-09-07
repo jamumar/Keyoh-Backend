@@ -3,6 +3,7 @@ const axios = require('axios');
 const User = require("../models/users");
 const PasswordReset = require("../models/password-resets");
 const UserBilling = require("../models/user-billings");
+const TrialDeviceClaims = require("../models/trial-device-claims");
 const { sequelize } = require('../lib/db');
 const { Op } = require('sequelize');
 const jwt = require("jsonwebtoken");
@@ -260,7 +261,7 @@ router.post('/login', loginLimiter, async (req, res) => {
 
 router.post('/check-agent-eligibility', async (req, res) => {
     try {
-        const { email, phone } = req.body || {};
+        const { email, phone, deviceId } = req.body || {};
         
         // 1. Check email/phone are not already registered IF provided
         const orConditions = [];
@@ -288,19 +289,42 @@ router.post('/check-agent-eligibility', async (req, res) => {
             }
         }
 
-        // 2. Check total agent count against trial limit
+        // 2. Check Device Free Trial Eligibility
+        let deviceClaimed = false;
+        const normalizedDeviceId = typeof deviceId === 'string' && deviceId.trim().length > 0
+            ? deviceId.trim()
+            : null;
+
+        if (normalizedDeviceId) {
+            const existingClaim = await TrialDeviceClaims.findOne({
+                where: { device_hash: normalizedDeviceId }
+            });
+            if (existingClaim) {
+                deviceClaimed = true;
+            }
+        }
+
+        // 3. Check total agent count against trial limit
         const agentCount = await User.count({
             where: { role: 'agent' }
         });
 
-        const isFree = agentCount < AGENT_FREE_TRIAL_LIMIT;
+        const isCountEligible = agentCount < AGENT_FREE_TRIAL_LIMIT;
+        // Trial is only free if spots remain AND this physical device hasn't already claimed
+        const isFree = isCountEligible && !deviceClaimed;
 
         return res.status(200).json({
             success: true,
             isFree,
+            deviceClaimed,
             agentCount,
             trialLimit: AGENT_FREE_TRIAL_LIMIT,
             spotsRemaining: Math.max(0, AGENT_FREE_TRIAL_LIMIT - agentCount),
+            message: deviceClaimed
+                ? 'This device has already claimed the 12-month free agent trial. Standard subscription checkout is required.'
+                : (!isCountEligible
+                    ? `The first ${AGENT_FREE_TRIAL_LIMIT} free agent trial spots have been claimed. Standard subscription checkout is required.`
+                    : null),
         });
     } catch (err) {
         console.error('[Auth] Error checking agent eligibility:', err);
@@ -321,6 +345,7 @@ router.post('/signup', async (req, res) => {
             role,
             revenueCatAppUserId,
             isFree,
+            deviceId,
             billing: clientBilling,
         } = req.body
         if (!email || !password) {
@@ -329,6 +354,10 @@ router.post('/signup', async (req, res) => {
                 success: false,
             })
         }
+
+        const normalizedDeviceId = typeof deviceId === 'string' && deviceId.trim().length > 0
+            ? deviceId.trim()
+            : null;
 
         let billingSnapshot = null;
 
@@ -359,7 +388,21 @@ router.post('/signup', async (req, res) => {
                     }
                 }
             } else {
-                // Agent signup default
+                // Free Agent Trial Path: Verify device hasn't already availed a trial
+                if (normalizedDeviceId) {
+                    const existingClaim = await TrialDeviceClaims.findOne({
+                        where: { device_hash: normalizedDeviceId }
+                    });
+                    if (existingClaim) {
+                        return res.status(403).json({
+                            message: 'This device has already claimed the 12-month free agent trial. Please proceed with standard subscription checkout.',
+                            success: false,
+                            deviceClaimed: true,
+                        });
+                    }
+                }
+
+                // Check trial spot count limit
                 const agentCount = await User.count({ where: { role: 'agent' } });
                 if (agentCount >= AGENT_FREE_TRIAL_LIMIT) {
                     return res.status(402).json({
@@ -395,6 +438,7 @@ router.post('/signup', async (req, res) => {
                 email,
                 password: bc_password,
                 role,
+                device_hash: normalizedDeviceId || null,
                 phone: req.body.phone || '',
                 location: req.body.location || '',
                 buyer_type: req.body.buyer_type || req.body.buyerType || '',
@@ -408,6 +452,14 @@ router.post('/signup', async (req, res) => {
                     user_id: newuser.id,
                     ...billingSnapshot,
                 }, { transaction });
+
+                // If this is a free trial claim and a device hash was supplied, record it
+                if (isFree && normalizedDeviceId) {
+                    await TrialDeviceClaims.create({
+                        device_hash: normalizedDeviceId,
+                        user_id: newuser.id,
+                    }, { transaction });
+                }
             }
 
             await transaction.commit();
