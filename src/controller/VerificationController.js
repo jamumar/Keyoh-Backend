@@ -287,7 +287,7 @@ router.get('/agent/status', ChatAuthMiddleware, async (req, res) => {
     }
 
     const isVerifiedAgent = Boolean(
-      user.role === 'agent' && (user.is_verified_agent || user.stripe_identity_status === 'pass')
+      user.role === 'agent' && (user.is_verified_agent || (user.stripe_identity_status === 'pass' && user.email_verified))
     );
 
     if (user.is_verified_agent !== isVerifiedAgent && isVerifiedAgent) {
@@ -298,6 +298,7 @@ router.get('/agent/status', ChatAuthMiddleware, async (req, res) => {
     return res.status(200).json({
       success: true,
       data: {
+        email_verified: Boolean(user.email_verified),
         stripe_identity_status: user.stripe_identity_status,
         stripe_identity_date: user.stripe_identity_date,
         is_verified_agent: isVerifiedAgent,

@@ -2,12 +2,10 @@ const { Properties, Users, AgentStats } = require('../models');
 const { getPendingHandoversForAgent } = require('./handoverService');
 
 const DEFAULT_RESPONSE_SCORE = 0;
-const DEFAULT_REVIEW_SCORE = 0;
 const DEFAULT_COMPLETION_SCORE = 0;
 
-const RESPONSE_WEIGHT = 0.4;
-const REVIEW_WEIGHT = 0.35;
-const COMPLETION_WEIGHT = 0.25;
+const RESPONSE_WEIGHT = 0.6;
+const COMPLETION_WEIGHT = 0.4;
 
 function scoreFromResponseMinutes(avgMinutes) {
     if (avgMinutes == null) return DEFAULT_RESPONSE_SCORE;
@@ -19,16 +17,6 @@ function scoreFromResponseMinutes(avgMinutes) {
     return 0;
 }
 
-function scoreFromReviewRating(avgRating) {
-    if (avgRating == null) return DEFAULT_REVIEW_SCORE;
-    if (avgRating >= 5) return 100;
-    if (avgRating >= 4.5) return 90;
-    if (avgRating >= 4) return 80;
-    if (avgRating >= 3.5) return 65;
-    if (avgRating >= 3) return 50;
-    return 30;
-}
-
 function scoreFromCompletionRate(completionRate, listingCount = 0) {
     if (listingCount === 0 || completionRate == null) return DEFAULT_COMPLETION_SCORE;
     if (completionRate >= 80) return 100;
@@ -38,11 +26,13 @@ function scoreFromCompletionRate(completionRate, listingCount = 0) {
     return 30;
 }
 
-function calculateKeyohScore({ responseTimeScore, reviewScore, completionRate, listingCount }) {
+function calculateKeyohScore({ responseTimeScore, completionRate, listingCount, totalEnquiries = 0 }) {
+    if (listingCount === 0 && totalEnquiries === 0) {
+        return 0;
+    }
     const completionScore = scoreFromCompletionRate(completionRate, listingCount);
     const total =
         responseTimeScore * RESPONSE_WEIGHT +
-        reviewScore * REVIEW_WEIGHT +
         completionScore * COMPLETION_WEIGHT;
 
     return Math.min(100, Math.max(0, Math.round(total)));
@@ -109,16 +99,14 @@ async function recalculateAgentStats(agentId) {
         console.warn('[agentStatsService] Response time calculation notice:', e.message);
     }
 
-    const avgReviewRating = null;
     const newEnquiries = 0;
 
     const responseTimeScore = scoreFromResponseMinutes(avgResponseMinutes);
-    const reviewScore = scoreFromReviewRating(avgReviewRating);
     const keyohScore = calculateKeyohScore({
         responseTimeScore,
-        reviewScore,
         completionRate,
         listingCount,
+        totalEnquiries,
     });
 
     const [stats] = await AgentStats.upsert({
@@ -128,7 +116,7 @@ async function recalculateAgentStats(agentId) {
         total_enquiries: totalEnquiries,
         new_enquiries: newEnquiries,
         avg_response_minutes: avgResponseMinutes,
-        avg_review_rating: avgReviewRating,
+        avg_review_rating: null,
         completion_rate: completionRate,
         keyoh_score: keyohScore,
         calculated_at: new Date(),
@@ -167,15 +155,17 @@ async function getDashboardStats(agentId, agentEmail) {
         ? await getPendingHandoversForAgent(agentEmail)
         : [];
 
+    const hasActivity = Boolean(stats.total_enquiries > 0 || listingCount > 0);
+
     return {
-        keyoh_score: stats.keyoh_score,
+        keyoh_score: hasActivity ? stats.keyoh_score : null,
+        has_activity: hasActivity,
         listing_count: listingCount,
         total_views: totalViews,
         total_enquiries: stats.total_enquiries,
         new_enquiries: stats.new_enquiries,
         completion_rate: completionRate,
         avg_response_minutes: stats.avg_response_minutes,
-        avg_review_rating: stats.avg_review_rating,
         calculated_at: stats.calculated_at,
         properties,
         pending_handovers_count: pendingHandovers.length,
@@ -189,6 +179,5 @@ module.exports = {
     recalculateAllAgentStats,
     getDashboardStats,
     scoreFromResponseMinutes,
-    scoreFromReviewRating,
     scoreFromCompletionRate,
 };
