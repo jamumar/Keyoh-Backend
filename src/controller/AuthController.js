@@ -301,6 +301,13 @@ router.post('/check-agent-eligibility', async (req, res) => {
             });
             if (existingClaim) {
                 deviceClaimed = true;
+            } else {
+                const existingAgentUser = await User.findOne({
+                    where: { device_hash: normalizedDeviceId, role: 'agent' }
+                });
+                if (existingAgentUser) {
+                    deviceClaimed = true;
+                }
             }
         }
 
@@ -393,7 +400,10 @@ router.post('/signup', async (req, res) => {
                     const existingClaim = await TrialDeviceClaims.findOne({
                         where: { device_hash: normalizedDeviceId }
                     });
-                    if (existingClaim) {
+                    const existingAgentUser = await User.findOne({
+                        where: { device_hash: normalizedDeviceId, role: 'agent' }
+                    });
+                    if (existingClaim || existingAgentUser) {
                         return res.status(403).json({
                             message: 'This device has already claimed the 12-month free agent trial. Please proceed with standard subscription checkout.',
                             success: false,
@@ -454,11 +464,16 @@ router.post('/signup', async (req, res) => {
                 }, { transaction });
 
                 // If this is a free trial claim and a device hash was supplied, record it
-                if (isFree && normalizedDeviceId) {
-                    await TrialDeviceClaims.create({
-                        device_hash: normalizedDeviceId,
-                        user_id: newuser.id,
-                    }, { transaction });
+                const isFreeTrial = (isFree === true || isFree === 'true' || isFree === 1 || isFree === '1' || billingSnapshot?.product_id === 'agent_free_trial_1yr');
+                if (isFreeTrial && normalizedDeviceId) {
+                    await TrialDeviceClaims.findOrCreate({
+                        where: { device_hash: normalizedDeviceId },
+                        defaults: {
+                            device_hash: normalizedDeviceId,
+                            user_id: newuser.id,
+                        },
+                        transaction,
+                    });
                 }
             }
 
@@ -620,15 +635,18 @@ router.post('/verify-email-otp', otpLimiter, async (req, res) => {
             });
         }
 
-        user.email_verified = true;
-        if (user.role === 'agent' && user.stripe_identity_status === 'pass') {
-            user.is_verified_agent = true;
-        }
-        await user.save();
+        await User.update(
+            {
+                email_verified: true,
+                ...(user.role === 'agent' && user.stripe_identity_status === 'pass' ? { is_verified_agent: true } : {})
+            },
+            { where: { id: user.id } }
+        );
 
         await record.destroy();
 
-        const { password, ...safeUser } = user.toJSON();
+        const updatedUser = await User.findByPk(user.id);
+        const { password, ...safeUser } = (updatedUser || user).toJSON();
 
         return res.status(200).json({
             success: true,
