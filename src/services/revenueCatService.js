@@ -111,7 +111,8 @@ const parseBillingFromSubscriber = (subscriberPayload) => {
 const getSubscriber = async (appUserId) => {
     const secretKey = process.env.REVENUECAT_SECRET_API_KEY;
     if (!secretKey) {
-        throw new Error('REVENUECAT_SECRET_API_KEY is not configured');
+        console.warn('[RevenueCat] Notice: REVENUECAT_SECRET_API_KEY is not configured in .env. Server-side API verification skipped.');
+        return null;
     }
 
     const response = await fetch(
