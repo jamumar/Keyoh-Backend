@@ -39,6 +39,7 @@ async function connectDB() {
             'ALTER TABLE users ADD COLUMN push_token VARCHAR(255) NULL;',
             'ALTER TABLE users ADD COLUMN avatar TEXT NULL;',
             'ALTER TABLE users ADD COLUMN apple_id VARCHAR(255) NULL;',
+            'ALTER TABLE users ADD COLUMN is_verified_agent BOOLEAN DEFAULT FALSE;',
             // Critical Performance Indexes
             'CREATE INDEX idx_properties_agent ON properties(agent_id);',
             'CREATE INDEX idx_properties_status ON properties(status);',

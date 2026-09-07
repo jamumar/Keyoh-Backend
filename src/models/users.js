@@ -60,6 +60,10 @@ const Users = sequelize.define("users", {
         type: DataTypes.BOOLEAN,
         defaultValue: false,
     },
+    is_verified_agent: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+    },
     seller_ownership_declaration: {
         type: DataTypes.BOOLEAN,
         defaultValue: false,

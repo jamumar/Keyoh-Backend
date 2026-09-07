@@ -244,6 +244,74 @@ router.get('/seller/status', ChatAuthMiddleware, async (req, res) => {
   }
 });
 
+// GET /verification/agent/status
+router.get('/agent/status', ChatAuthMiddleware, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  try {
+    const user = await Users.findByPk(req.user.id, {
+      attributes: [
+        'id',
+        'email',
+        'agency_name',
+        'role',
+        'stripe_identity_status',
+        'stripe_identity_session_id',
+        'stripe_identity_date',
+        'is_verified_agent',
+        'email_verified',
+      ],
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Agent account not found',
+      });
+    }
+
+    if (stripe && user.stripe_identity_status !== 'pass' && user.stripe_identity_session_id) {
+      try {
+        const session = await stripe.identity.verificationSessions.retrieve(user.stripe_identity_session_id);
+        if (session.status === 'verified') {
+          user.stripe_identity_status = 'pass';
+          user.stripe_identity_date = new Date();
+          user.is_verified_agent = true;
+          await user.save();
+        } else if (session.status === 'canceled') {
+          user.stripe_identity_status = 'fail';
+          await user.save();
+        }
+      } catch (pollErr) {
+        console.warn('[StripeIdentity] Agent status poll error:', pollErr.message);
+      }
+    }
+
+    const isVerifiedAgent = Boolean(
+      user.role === 'agent' && (user.is_verified_agent || user.stripe_identity_status === 'pass')
+    );
+
+    if (user.is_verified_agent !== isVerifiedAgent && isVerifiedAgent) {
+      user.is_verified_agent = true;
+      await user.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        stripe_identity_status: user.stripe_identity_status,
+        stripe_identity_date: user.stripe_identity_date,
+        is_verified_agent: isVerifiedAgent,
+        agency_name: user.agency_name || '',
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
 // POST /verification/buyer/position
 router.post('/buyer/position', ChatAuthMiddleware, async (req, res) => {
   try {

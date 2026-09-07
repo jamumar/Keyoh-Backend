@@ -1,9 +1,9 @@
 const { Properties, Users, AgentStats } = require('../models');
 const { getPendingHandoversForAgent } = require('./handoverService');
 
-const DEFAULT_RESPONSE_SCORE = 70;
-const DEFAULT_REVIEW_SCORE = 70;
-const DEFAULT_COMPLETION_SCORE = 70;
+const DEFAULT_RESPONSE_SCORE = 0;
+const DEFAULT_REVIEW_SCORE = 0;
+const DEFAULT_COMPLETION_SCORE = 0;
 
 const RESPONSE_WEIGHT = 0.4;
 const REVIEW_WEIGHT = 0.35;

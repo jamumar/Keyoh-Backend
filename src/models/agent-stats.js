@@ -48,7 +48,7 @@ const AgentStats = sequelize.define('agent_stats', {
     keyoh_score: {
         type: DataTypes.INTEGER,
         allowNull: false,
-        defaultValue: 70,
+        defaultValue: 0,
     },
     calculated_at: {
         type: DataTypes.DATE,
