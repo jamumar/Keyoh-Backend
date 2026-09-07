@@ -478,6 +478,13 @@ router.post('/resend-verification', otpLimiter, async (req, res) => {
         if (!user) {
             return res.status(404).json({ success: false, message: 'User not found' });
         }
+        if (user.email_verified) {
+            return res.status(200).json({
+                success: true,
+                message: 'Email address is already verified.',
+                already_verified: true,
+            });
+        }
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         await PasswordReset.destroy({ where: { email: normalizedEmail } });
         await PasswordReset.create({
@@ -506,6 +513,14 @@ router.post('/send-verification-otp', otpLimiter, async (req, res) => {
             return res.status(400).json({ success: false, message: 'Email address is required' });
         }
         const normalizedEmail = email.trim().toLowerCase();
+        const user = await User.findOne({ where: { email: normalizedEmail } });
+        if (user && user.email_verified) {
+            return res.status(200).json({
+                success: true,
+                message: 'Email address is already verified.',
+                already_verified: true,
+            });
+        }
         const code = Math.floor(100000 + Math.random() * 900000).toString();
         await PasswordReset.destroy({ where: { email: normalizedEmail } });
         await PasswordReset.create({
@@ -537,6 +552,11 @@ router.post('/verify-email-otp', otpLimiter, async (req, res) => {
             return res.status(400).json({ success: false, message: 'Email and 6-digit OTP code are required' });
         }
         const normalizedEmail = email.trim().toLowerCase();
+        const user = await User.findOne({ where: { email: normalizedEmail } });
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User account not found' });
+        }
+
         const record = await PasswordReset.findOne({
             where: { email: normalizedEmail, code: String(code).trim() },
         });
@@ -548,16 +568,21 @@ router.post('/verify-email-otp', otpLimiter, async (req, res) => {
             });
         }
 
-        await User.update(
-            { email_verified: true },
-            { where: { email: normalizedEmail } }
-        );
+        user.email_verified = true;
+        if (user.role === 'agent' && user.stripe_identity_status === 'pass') {
+            user.is_verified_agent = true;
+        }
+        await user.save();
 
         await record.destroy();
+
+        const { password, ...safeUser } = user.toJSON();
 
         return res.status(200).json({
             success: true,
             message: 'Email verified successfully',
+            data: safeUser,
+            user: safeUser,
         });
     } catch (err) {
         console.error('verify-email-otp error:', err.message);
@@ -670,23 +695,19 @@ router.post('/verify-code', async (req, res) => {
     }
 });
 
-router.get('/verify-user', CustomerMiddleware, async (req, res) => {
+router.get('/verify-user', ChatAuthMiddleware, async (req, res) => {
     try {
         const userId = req.user?.id || req.user?.userId;
         const user = await User.findByPk(userId);
         if (user) {
+            const { password, ...safeUser } = user.toJSON();
             return res.status(200).json({
                 message: 'User verified',
                 success: true,
-                data: {
-                    id: user.id,
-                    email: user.email,
-                    name: user.name,
-                    role: user.role,
-                },
+                data: safeUser,
             });
         } else {
-            return res.status(400).json({
+            return res.status(404).json({
                 message: 'User not found',
                 success: false,
             });
