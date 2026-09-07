@@ -325,7 +325,7 @@ router.post('/:id/accept', ChatAuthMiddleware, async (req, res) => {
         const formatted = formatOffer(offer);
 
         // Notify chat
-        const acceptText = `OFFER ACCEPTED!\n\nYour offer of ${formatted.formattedAmount} for ${formatted.propertyAddress} was ACCEPTED!\n\nLegal Next Step: Please instruct your solicitors to proceed with conveyancing.`;
+        const acceptText = `Offer agreed. ${formatted.propertyAddress} is now marked sold subject to contract at ${formatted.formattedAmount}. Both sides should now instruct a conveyancer.`;
         await appendSystemChatMessage({
             buyerId: offer.buyer_id,
             sellerId: offer.seller_id,
@@ -534,7 +534,7 @@ router.post('/:id/complete', ChatAuthMiddleware, async (req, res) => {
 
         const formatted = formatOffer(offer);
 
-        const soldText = `PROPERTY SOLD: The sale of ${formatted.propertyAddress} for ${formatted.formattedAmount} has completed successfully. Congratulations!`;
+        const soldText = `Sold. ${formatted.propertyAddress} is now marked as sold.`;
         await appendSystemChatMessage({
             buyerId: offer.buyer_id,
             sellerId: offer.seller_id,

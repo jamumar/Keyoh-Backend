@@ -43,7 +43,8 @@ function buildLocationSearchClause(query = {}) {
 }
 
 function buildPropertyWhere(query = {}) {
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    // Sold properties remain visible in feed with 'Sold' label for 6 months
+    const sixMonthsAgo = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000);
 
     const where = {
         hidden_at: null,
@@ -53,8 +54,8 @@ function buildPropertyWhere(query = {}) {
             {
                 status: 'sold',
                 [Op.or]: [
-                    { sold_at: { [Op.gte]: thirtyDaysAgo } },
-                    { updatedAt: { [Op.gte]: thirtyDaysAgo } },
+                    { sold_at: { [Op.gte]: sixMonthsAgo } },
+                    { updatedAt: { [Op.gte]: sixMonthsAgo } },
                 ],
             },
         ],

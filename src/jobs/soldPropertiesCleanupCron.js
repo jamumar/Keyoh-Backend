@@ -3,21 +3,23 @@ const { Properties } = require('../models');
 const { Op } = require('sequelize');
 
 /**
- * Automatically purges / soft-deletes sold properties after 30 days in sold status
+ * Automatically hides sold properties from feed 6 months (180 days) after sold date.
+ * Record is permanently preserved in database for reporting and metrics (deleted_at remains null).
  */
 async function purgeExpiredSoldProperties() {
   try {
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const sixMonthsAgo = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000);
 
     const expiredSoldProperties = await Properties.findAll({
       where: {
         status: 'sold',
+        hidden_at: null,
         deleted_at: null,
         [Op.or]: [
-          { sold_at: { [Op.lte]: thirtyDaysAgo } },
+          { sold_at: { [Op.lte]: sixMonthsAgo } },
           {
             sold_at: null,
-            updatedAt: { [Op.lte]: thirtyDaysAgo },
+            updatedAt: { [Op.lte]: sixMonthsAgo },
           },
         ],
       },
@@ -29,14 +31,14 @@ async function purgeExpiredSoldProperties() {
 
     const now = new Date();
     for (const prop of expiredSoldProperties) {
-      prop.deleted_at = now;
+      prop.hidden_at = now;
       await prop.save();
     }
 
-    console.log(`[cron] Soft-deleted ${expiredSoldProperties.length} sold property listing(s) older than 30 days.`);
+    console.log(`[cron] Auto-archived ${expiredSoldProperties.length} sold property listing(s) older than 6 months (hidden from feed, preserved in DB).`);
     return expiredSoldProperties.length;
   } catch (error) {
-    console.error('[cron] Purge expired sold properties failed:', error.message);
+    console.error('[cron] Archive expired sold properties failed:', error.message);
     throw error;
   }
 }
@@ -54,7 +56,7 @@ function startSoldPropertiesCleanupCron() {
     { timezone: 'Europe/London' }
   );
 
-  console.log('[cron] 30-Day Sold Properties Auto-Cleanup Cron scheduled daily at 03:30 AM Europe/London');
+  console.log('[cron] 6-Month Sold Properties Feed Auto-Archive Cron scheduled daily at 03:30 AM Europe/London');
 }
 
 module.exports = {
