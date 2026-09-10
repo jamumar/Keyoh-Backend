@@ -128,7 +128,8 @@ router.put('/profile', CustomerMiddleware, async (req, res) => {
 });
 
 // POST /auth/switch-role — Instantly switch between Buyer ('user') and Seller Mode
-router.post('/switch-role', CustomerMiddleware, async (req, res) => {
+// Accept both session types so a seller can switch back to buyer mode using their seller token.
+router.post('/switch-role', ChatAuthMiddleware, async (req, res) => {
     try {
         const userId = req.user.id;
         const { role } = req.body;
