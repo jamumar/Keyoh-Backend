@@ -233,6 +233,27 @@ const buildFreeAgentBillingSnapshot = () => {
     };
 };
 
+const buildFreeSellerBillingSnapshot = () => {
+    const startDate = new Date();
+    const expireDate = new Date(startDate);
+    expireDate.setFullYear(expireDate.getFullYear() + 1);
+
+    return {
+        revenue_cat_app_user_id: `free-seller-${Date.now()}`,
+        product_id: 'seller_free_listing',
+        package_id: 'free_listing',
+        offering_id: 'seller_free_trial',
+        entitlement_id: 'seller_listing',
+        billing_period: 'one_time',
+        status: 'active',
+        start_date: startDate,
+        expire_date: expireDate,
+        will_renew: false,
+        store: 'promotional',
+        is_trial: true,
+    };
+};
+
 module.exports = {
     getSubscriber,
     hasActiveEntitlement,
@@ -242,6 +263,7 @@ module.exports = {
     mapClientBillingToSnapshot,
     canTrustClientBilling,
     buildFreeAgentBillingSnapshot,
+    buildFreeSellerBillingSnapshot,
     inferBillingPeriod,
     normalizeStore,
 };

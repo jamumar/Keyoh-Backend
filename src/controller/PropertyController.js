@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { Op } = require('sequelize');
-const { Properties, PropertyType, TenureType, Users, Offers } = require('../models');
+const { Properties, PropertyType, TenureType, Users, Offers, UserBillings } = require('../models');
+const TrialDeviceClaims = require('../models/trial-device-claims');
+const { buildFreeSellerBillingSnapshot } = require('../services/revenueCatService');
 const { AgentMiddlware, PropertyOwnerMiddleware } = require('../middleware');
 const { buildPropertyQueryOptions } = require('../services/propertyFilterService');
 const { checkImageSafety, checkImagesBatchSafety } = require('../services/openaiModerationService');
@@ -466,6 +468,48 @@ router.post('/', PropertyOwnerMiddleware, uploadProperty, async (req, res) => {
         });
 
         console.log('[property] 🎉 Property created successfully! ID:', newProperty.id);
+
+        // ── First 100 Sellers Free Listing: Auto-create billing record ──
+        if (req.user.role === 'seller') {
+            try {
+                const SELLER_FREE_LISTING_LIMIT = parseInt(process.env.SELLER_FREE_LISTING_LIMIT, 10) || 100;
+                const existingFreeBilling = await UserBillings.findOne({
+                    where: { user_id: ownerId, product_id: 'seller_free_listing' },
+                });
+
+                if (!existingFreeBilling) {
+                    const sellerFreeCount = await UserBillings.count({
+                        where: { product_id: 'seller_free_listing' },
+                    });
+
+                    if (sellerFreeCount < SELLER_FREE_LISTING_LIMIT) {
+                        const sellerBilling = buildFreeSellerBillingSnapshot();
+                        await UserBillings.create({
+                            user_id: ownerId,
+                            ...sellerBilling,
+                        });
+
+                        // Record device claim if available
+                        const deviceHash = req.user.device_hash;
+                        if (deviceHash) {
+                            await TrialDeviceClaims.findOrCreate({
+                                where: { device_hash: deviceHash, claim_type: 'seller' },
+                                defaults: {
+                                    device_hash: deviceHash,
+                                    claim_type: 'seller',
+                                    user_id: ownerId,
+                                },
+                            });
+                        }
+
+                        console.log(`[property] ✓ Free seller listing billing created for User #${ownerId} (spot ${sellerFreeCount + 1}/${SELLER_FREE_LISTING_LIMIT})`);
+                    }
+                }
+            } catch (billingErr) {
+                // Non-blocking: property is already created, billing is secondary
+                console.error('[property] ⚠️ Free seller billing creation failed (non-blocking):', billingErr.message);
+            }
+        }
 
         res.status(201).json({
             success: true,

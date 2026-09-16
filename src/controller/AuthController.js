@@ -17,6 +17,7 @@ const {
     mapClientBillingToSnapshot,
     canTrustClientBilling,
     buildFreeAgentBillingSnapshot,
+    buildFreeSellerBillingSnapshot,
 } = require('../services/revenueCatService');
 require('dotenv').config();
 
@@ -41,8 +42,11 @@ const otpLimiter = rateLimit({
 
 const router = express.Router();
 
-// Agent free trial spots limit (3 for testing, 100 for production)
-const AGENT_FREE_TRIAL_LIMIT = parseInt(process.env.AGENT_FREE_TRIAL_LIMIT, 10) || 3;
+// Agent free trial spots limit
+const AGENT_FREE_TRIAL_LIMIT = parseInt(process.env.AGENT_FREE_TRIAL_LIMIT, 10) || 100;
+
+// Seller free listing spots limit (independent of agent count)
+const SELLER_FREE_LISTING_LIMIT = parseInt(process.env.SELLER_FREE_LISTING_LIMIT, 10) || 100;
 
 router.post('/push-token', ChatAuthMiddleware, async (req, res) => {
     try {
@@ -298,7 +302,7 @@ router.post('/check-agent-eligibility', async (req, res) => {
 
         if (normalizedDeviceId) {
             const existingClaim = await TrialDeviceClaims.findOne({
-                where: { device_hash: normalizedDeviceId }
+                where: { device_hash: normalizedDeviceId, claim_type: 'agent' }
             });
             if (existingClaim) {
                 deviceClaimed = true;
@@ -336,6 +340,55 @@ router.post('/check-agent-eligibility', async (req, res) => {
         });
     } catch (err) {
         console.error('[Auth] Error checking agent eligibility:', err);
+        return res.status(500).json({
+            message: 'Something went wrong checking eligibility',
+            success: false,
+        });
+    }
+});
+
+// ── Seller Free Listing Eligibility Check ──
+router.post('/check-seller-eligibility', async (req, res) => {
+    try {
+        const { deviceId } = req.body || {};
+
+        let deviceClaimed = false;
+        const normalizedDeviceId = typeof deviceId === 'string' && deviceId.trim().length > 0
+            ? deviceId.trim()
+            : null;
+
+        if (normalizedDeviceId) {
+            const existingClaim = await TrialDeviceClaims.findOne({
+                where: { device_hash: normalizedDeviceId, claim_type: 'seller' }
+            });
+            if (existingClaim) {
+                deviceClaimed = true;
+            }
+        }
+
+        // Count unique sellers who have claimed a free listing
+        const sellerFreeCount = await UserBilling.count({
+            where: { product_id: 'seller_free_listing' }
+        });
+
+        const isCountEligible = sellerFreeCount < SELLER_FREE_LISTING_LIMIT;
+        const isFree = isCountEligible && !deviceClaimed;
+
+        return res.status(200).json({
+            success: true,
+            isFree,
+            deviceClaimed,
+            sellerFreeCount,
+            trialLimit: SELLER_FREE_LISTING_LIMIT,
+            spotsRemaining: Math.max(0, SELLER_FREE_LISTING_LIMIT - sellerFreeCount),
+            message: deviceClaimed
+                ? 'This device has already claimed a free seller listing.'
+                : (!isCountEligible
+                    ? `The first ${SELLER_FREE_LISTING_LIMIT} free seller listing spots have been claimed.`
+                    : null),
+        });
+    } catch (err) {
+        console.error('[Auth] Error checking seller eligibility:', err);
         return res.status(500).json({
             message: 'Something went wrong checking eligibility',
             success: false,
@@ -399,7 +452,7 @@ router.post('/signup', async (req, res) => {
                 // Free Agent Trial Path: Verify device hasn't already availed a trial
                 if (normalizedDeviceId) {
                     const existingClaim = await TrialDeviceClaims.findOne({
-                        where: { device_hash: normalizedDeviceId }
+                        where: { device_hash: normalizedDeviceId, claim_type: 'agent' }
                     });
                     const existingAgentUser = await User.findOne({
                         where: { device_hash: normalizedDeviceId, role: 'agent' }
@@ -468,9 +521,59 @@ router.post('/signup', async (req, res) => {
                 const isFreeTrial = (isFree === true || isFree === 'true' || isFree === 1 || isFree === '1' || billingSnapshot?.product_id === 'agent_free_trial_1yr');
                 if (isFreeTrial && normalizedDeviceId) {
                     await TrialDeviceClaims.findOrCreate({
-                        where: { device_hash: normalizedDeviceId },
+                        where: { device_hash: normalizedDeviceId, claim_type: 'agent' },
                         defaults: {
                             device_hash: normalizedDeviceId,
+                            claim_type: 'agent',
+                            user_id: newuser.id,
+                        },
+                        transaction,
+                    });
+                }
+            }
+
+            // ── Seller Free Listing Billing ──
+            if (role === 'seller' && (isFree === true || isFree === 'true' || isFree === 1 || isFree === '1')) {
+                // Verify device hasn't already claimed a free seller listing
+                if (normalizedDeviceId) {
+                    const existingSellerClaim = await TrialDeviceClaims.findOne({
+                        where: { device_hash: normalizedDeviceId, claim_type: 'seller' },
+                    });
+                    if (existingSellerClaim) {
+                        await transaction.rollback();
+                        return res.status(403).json({
+                            message: 'This device has already claimed a free seller listing.',
+                            success: false,
+                            deviceClaimed: true,
+                        });
+                    }
+                }
+
+                // Verify free seller spots remain
+                const sellerFreeCount = await UserBilling.count({
+                    where: { product_id: 'seller_free_listing' },
+                });
+                if (sellerFreeCount >= SELLER_FREE_LISTING_LIMIT) {
+                    await transaction.rollback();
+                    return res.status(402).json({
+                        message: `The first ${SELLER_FREE_LISTING_LIMIT} free seller listing spots have been claimed. Standard listing fee checkout is required.`,
+                        success: false,
+                    });
+                }
+
+                const sellerBilling = buildFreeSellerBillingSnapshot();
+                await UserBilling.create({
+                    user_id: newuser.id,
+                    ...sellerBilling,
+                }, { transaction });
+
+                // Record device claim for seller
+                if (normalizedDeviceId) {
+                    await TrialDeviceClaims.findOrCreate({
+                        where: { device_hash: normalizedDeviceId, claim_type: 'seller' },
+                        defaults: {
+                            device_hash: normalizedDeviceId,
+                            claim_type: 'seller',
                             user_id: newuser.id,
                         },
                         transaction,
