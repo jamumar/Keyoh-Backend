@@ -41,7 +41,8 @@ async function connectDB() {
             'ALTER TABLE users ADD COLUMN apple_id VARCHAR(255) NULL;',
             'ALTER TABLE users ADD COLUMN is_verified_agent BOOLEAN DEFAULT FALSE;',
             'ALTER TABLE users ADD COLUMN device_hash VARCHAR(128) NULL;',
-            'CREATE TABLE IF NOT EXISTS trial_device_claims (id INT AUTO_INCREMENT PRIMARY KEY, device_hash VARCHAR(128) NOT NULL, user_id INT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uq_trial_device_hash (device_hash), KEY idx_trial_device_user (user_id));',
+            'CREATE TABLE IF NOT EXISTS trial_device_claims (id INT AUTO_INCREMENT PRIMARY KEY, device_hash VARCHAR(128) NOT NULL, claim_type ENUM(\'agent\', \'seller\') NOT NULL DEFAULT \'agent\', user_id INT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, KEY idx_trial_device_user (user_id));',
+            'ALTER TABLE trial_device_claims ADD COLUMN claim_type ENUM(\'agent\', \'seller\') NOT NULL DEFAULT \'agent\' AFTER device_hash;',
             'CREATE INDEX idx_users_device_hash ON users(device_hash);',
             // Critical Performance Indexes
             'CREATE INDEX idx_properties_agent ON properties(agent_id);',
